@@ -31,18 +31,18 @@
     "tenantQuery": "select id from tenants where subdominio = $1"
   },
   "web": {
-    "baseUrl": "https://app.freeluxenergia.com.br",
-    "tenantUrl": "https://{tenant}.freeluxenergia.com.br",
+    "baseUrl": "https://app.suaempresa.com.br",
+    "tenantUrl": "https://{tenant}.suaempresa.com.br",
     "allowedHosts": [
-      "*.freeluxenergia.com.br"
+      "*.suaempresa.com.br"
     ],
     "login": {
-      "path": "/seguranca/login",
+      "path": "/login",
       "fields": {
         "#email": "{user}",
         "#senha": "{password}"
       },
-      "submit": "#submeter"
+      "submit": "button[type=submit]"
     }
   },
   "rules": [

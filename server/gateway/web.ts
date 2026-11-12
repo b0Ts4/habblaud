@@ -215,7 +215,7 @@ export class GatewayWeb {
     return s;
   }
 
-  /** Endereço da tela de login: relativo ao endereço do tenant (ex.: https://<tenant>.empresa.com/seguranca/login). */
+  /** Endereço da tela de login: relativo ao endereço do tenant (ex.: https://<tenant>.empresa.com/login). */
   loginUrl(tenant: string): string {
     const origin = new URL(fill(this.cfg.tenantUrl ?? '{base}', { base: this.cfg.baseUrl, tenant })).origin;
     const url = new URL(this.cfg.login!.path.replace(/^\/?/, '/'), origin).toString();

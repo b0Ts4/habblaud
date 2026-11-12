@@ -100,8 +100,8 @@ GRANT EXECUTE ON FUNCTION pg_catalog.set_config(text, text, boolean) TO <usuári
 
 - Os usuários dos agentes **não** podem ser donos das tabelas, superusuário nem ter `BYPASSRLS` (o RLS não vale para
   eles). Se a aplicação é dona das tabelas, use `ALTER TABLE ... FORCE ROW LEVEL SECURITY`.
-- **Tenant UUID e subdomínio** (o caso da Freelux: as políticas leem `app.current_tenant` como UUID, e o sistema web usa
-  um subdomínio por cliente): use `"tenantSetting": "app.current_tenant"` e `"tenantQuery": "select id from <tabela> where
+- **Tenant UUID e subdomínio** (ex.: as políticas leem `app.current_tenant` como UUID, e o sistema web usa um
+  subdomínio por cliente): use `"tenantSetting": "app.current_tenant"` e `"tenantQuery": "select id from <tabela> where
   <coluna do subdomínio> = $1"`. Os agentes falam o subdomínio (o mesmo do sistema web) e o gateway traduz para o UUID
   (com cache de 10 min); um UUID também é aceito direto. Subdomínio que a consulta não acha é recusado.
 - Confira a política: `\d+ pedidos` no psql mostra o `USING (tenant_id = current_setting('app.tenant_id'))`. Se a de
@@ -130,15 +130,15 @@ sede (AES-256-GCM, em `gateway-credenciais.json`, com a chave em `gateway-key`),
 agente a vê. Sem login cadastrado, o agente recebe o aviso para a pessoa cadastrar. Se a sessão do sistema expira, o
 navegador entra de novo sozinho.
 
-Sistema com **um subdomínio por cliente** (como `<cliente>.freeluxenergia.com.br`):
+Sistema com **um subdomínio por cliente** (como `<cliente>.suaempresa.com.br`):
 
 ```json
 "tenants": "*",
 "web": {
-  "baseUrl": "https://app.freeluxenergia.com.br",
-  "tenantUrl": "https://{tenant}.freeluxenergia.com.br",
-  "allowedHosts": ["*.freeluxenergia.com.br"],
-  "login": { "path": "/seguranca/login", "fields": { "#email": "{user}", "#senha": "{password}" }, "submit": "#submeter" }
+  "baseUrl": "https://app.suaempresa.com.br",
+  "tenantUrl": "https://{tenant}.suaempresa.com.br",
+  "allowedHosts": ["*.suaempresa.com.br"],
+  "login": { "path": "/login", "fields": { "#email": "{user}", "#senha": "{password}" }, "submit": "button[type=submit]" }
 }
 ```
 

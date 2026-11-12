@@ -229,12 +229,12 @@ describe('navegador livre (sites externos)', () => {
   });
 });
 
-// Banco no formato do da empresa (tenant UUID, app.current_tenant, subdomínio numa tabela): HABBLAUD_TEST_PG_UUID=1.
+// Banco com tenant UUID (tenant UUID, app.current_tenant, subdomínio numa tabela): HABBLAUD_TEST_PG_UUID=1.
 describe.skipIf(!process.env.HABBLAUD_TEST_PG_UUID)('tenant por subdomínio traduzido para UUID', () => {
   it('cada subdomínio vê só os dados do seu UUID; ao criar, o gateway põe o UUID', async () => {
     const dbc = {
-      readUrl: 'postgres://agente_leitura_f:l@127.0.0.1/freelux_teste',
-      writeUrl: 'postgres://agente_escrita_f:e@127.0.0.1/freelux_teste',
+      readUrl: 'postgres://agente_leitura_f:l@127.0.0.1/tenant_uuid_teste',
+      writeUrl: 'postgres://agente_escrita_f:e@127.0.0.1/tenant_uuid_teste',
       tenantSetting: 'app.current_tenant',
       tenantQuery: 'select id from tenants where subdominio = $1',
       settings: {},
@@ -247,13 +247,13 @@ describe.skipIf(!process.env.HABBLAUD_TEST_PG_UUID)('tenant por subdomínio trad
     };
     const db = new GatewayDb(dbc);
     try {
-      expect((await db.query('solarsul', "select uc from faturas where uc = 'UC-1'")).rows).toEqual([['UC-1']]);
-      expect((await db.query('energianorte', "select uc from faturas where uc = 'UC-1'")).rows).toEqual([]);
+      expect((await db.query('cliente-a', "select uc from faturas where uc = 'UC-1'")).rows).toEqual([['UC-1']]);
+      expect((await db.query('cliente-b', "select uc from faturas where uc = 'UC-1'")).rows).toEqual([]);
       expect((await db.query('11111111-1111-1111-1111-111111111111', "select uc from faturas where uc = 'UC-1'")).rows).toEqual([['UC-1']]);
       await expect(db.query('naoexiste', 'select 1')).rejects.toThrow(/não encontrado/);
-      const plan = await planChange(db, dbc, 'solarsul', parseChange({ acao: 'criar', tabela: 'faturas', valores: { uc: 'UC-T', valor: 1 } }, dbc));
+      const plan = await planChange(db, dbc, 'cliente-a', parseChange({ acao: 'criar', tabela: 'faturas', valores: { uc: 'UC-T', valor: 1 } }, dbc));
       expect(plan.rows[0].after?.tenant_id).toBe('11111111-1111-1111-1111-111111111111');
-      await expect(planChange(db, dbc, 'solarsul', parseChange({ acao: 'atualizar', tabela: 'faturas', onde: [{ coluna: 'uc', valor: 'UC-9' }], valores: { status: 'x' } }, dbc))).rejects.toThrow(/nenhum registro/);
+      await expect(planChange(db, dbc, 'cliente-a', parseChange({ acao: 'atualizar', tabela: 'faturas', onde: [{ coluna: 'uc', valor: 'UC-9' }], valores: { status: 'x' } }, dbc))).rejects.toThrow(/nenhum registro/);
     } finally {
       await db.close();
     }

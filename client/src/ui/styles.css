@@ -8172,6 +8172,20 @@ html.is-replay #world {
   z-index: 31;
 }
 
+/* Como o terminal ao vivo (.ui-term): em telas estreitas, por cima da gaveta; no celular, tela cheia por cima de tudo
+   (sem isto o z-index acima o deixava atrás da barra superior e dos medidores de uso). */
+@media (max-width: 900px) {
+  .ui-pty {
+    z-index: 42;
+  }
+}
+
+@media (max-width: 600px) {
+  .ui-pty {
+    z-index: 58;
+  }
+}
+
 .ui-pty__live {
   flex: none;
   padding: 2px 7px;

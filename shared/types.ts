@@ -709,6 +709,8 @@ export interface OutboxMessage {
 /** Estado do terminal interativo (OfficeSnapshot.meta.pty). */
 export interface PtyStatus {
   enabled: boolean;
+  /** Ferramentas que dá para abrir no terminal interativo deste computador (ausente = só o Claude Code). */
+  providers?: Provider[];
   /** Por que está desligado. */
   reason?: string;
 }
@@ -721,6 +723,12 @@ export interface PtyInfo {
   cwd: string;
   account: string;
   agentId: string;
+  /** Ferramenta do terminal; ausente = 'claude'. */
+  provider?: Provider;
+  /** Terminal de login da conta (não é um agente). */
+  login?: boolean;
+  /** Codex: a conversa já foi ligada ao terminal (agentId deixou de ser provisório). */
+  linked?: boolean;
   /** Sessão retomada (`claude --resume`), quando o terminal assumiu uma sessão que já existia. */
   resumed?: string;
   /** Agente que este terminal assumiu (o id antigo, do processo encerrado). */

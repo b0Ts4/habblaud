@@ -14,7 +14,8 @@ import { verifyPassword } from '../remote/password';
 import type { CentralSessions } from './auth';
 import { allowed, memberByToken, type CentralConfig, type CentralPolicy, type Member } from './config';
 import type { CentralHub } from './hub';
-import { mapDetail, mapOutbox, mapPermission, mapTerminalInit, splitId, type ViewerRights } from './merge';
+import type { PtyInfo, PtyStatus } from '../../shared/types';
+import { canControl, mapDetail, mapOutbox, mapPermission, mapPty, mapTerminalInit, splitId, type ViewerRights } from './merge';
 import type { MemberUpdate, Members, TunnelRequest } from './members';
 
 /** Maior estado aceito de um membro (snapshot descomprimido). */
@@ -144,6 +145,10 @@ export function createCentralApp(deps: CentralAppDeps): (req: IncomingMessage, r
           return;
         }
         const raw = await readBody(out.body, MAX_TUNNEL_JSON);
+        if (!raw.length) {
+          res.writeHead(out.status, { 'Cache-Control': 'no-store' });
+          return void res.end();
+        }
         let data: unknown;
         try {
           data = JSON.parse(raw.toString('utf8'));
@@ -180,7 +185,8 @@ export function createCentralApp(deps: CentralAppDeps): (req: IncomingMessage, r
       if (path === '/central/uplink/state' && method === 'POST') {
         readJson<MemberUpdate>(req, MAX_STATE)
           .then((u) => {
-            members.update(m.id, m.name, { snapshot: u.snapshot, feed: Array.isArray(u.feed) ? u.feed : undefined, notices: Array.isArray(u.notices) ? u.notices : undefined });
+            const caps = u.caps && Array.isArray(u.caps.allow) ? { allow: u.caps.allow.map(String), pty: u.caps.pty === true, providers: Array.isArray(u.caps.providers) ? u.caps.providers.map(String) : [] } : undefined;
+            members.update(m.id, m.name, { snapshot: u.snapshot, caps, feed: Array.isArray(u.feed) ? u.feed : undefined, notices: Array.isArray(u.notices) ? u.notices : undefined });
             sendJson(res, 200, { ok: true, member: m.id });
           })
           .catch(() => sendJson(res, 400, { error: tr('estado inválido') }));
@@ -270,7 +276,8 @@ export function createCentralApp(deps: CentralAppDeps): (req: IncomingMessage, r
     const may = (owner: string, what: keyof CentralPolicy) => allowed(cfg, who, owner, what);
 
     if (path === '/api/access') {
-      const access: AccessInfo = { remote: true, local: false, permissions: true, messages: true, terminal: true, spawn: false, world: false };
+      // "Novo agente" abre no computador da própria pessoa (pelo terminal interativo dele).
+      const access: AccessInfo = { remote: true, local: false, permissions: true, messages: true, terminal: true, spawn: canControl(members.state(who.id)), world: false };
       sendJson(res, 200, access);
       return true;
     }
@@ -338,6 +345,71 @@ export function createCentralApp(deps: CentralAppDeps): (req: IncomingMessage, r
       } else if (!perm[2] && method === 'GET') {
         tunnel(res, id.member, { method: 'GET', path: local }, { json: (d) => mapPermission(id.member, d as PermissionRequestInfo) });
       } else sendJson(res, 405, { error: tr('método não permitido') });
+      return true;
+    }
+
+    // ---- Comandar o próprio computador (terminal interativo, agentes novos) -------------------------------
+    // Só o dono: ninguém, nem administrador, digita no computador de outra pessoa pela sede.
+    const control = () => {
+      if (!canControl(members.state(who.id))) {
+        req.resume();
+        sendJson(res, 409, { error: tr('o seu computador não está conectado à sede com o terminal interativo ligado (HABBLAUD_PTY=1)') });
+        return false;
+      }
+      return true;
+    };
+    if (path === '/api/pty') {
+      if (!control()) return true;
+      if (method === 'GET') {
+        tunnel(res, who.id, { method: 'GET', path: '/api/pty' }, { json: (d) => {
+          const r = d as { status: PtyStatus; ptys: PtyInfo[] };
+          return { ...r, ptys: (r.ptys ?? []).map((p) => mapPty(who.id, p)) };
+        } });
+      } else if (method === 'POST') {
+        readJson<Record<string, unknown>>(req)
+          .then((body) => {
+            // A conta vem com o prefixo do membro; só vale conta do próprio computador.
+            let account = body.account;
+            if (typeof account === 'string') {
+              const id = splitId(account);
+              if (!id || id.member !== who.id) return sendJson(res, 403, { error: tr('conta de outra pessoa') });
+              account = id.id;
+            }
+            tunnel(res, who.id, { method: 'POST', path: '/api/pty', body: { ...body, account } }, { json: (d) => mapPty(who.id, d as PtyInfo) });
+          })
+          .catch(() => sendJson(res, 400, { error: tr('requisição inválida') }));
+      } else sendJson(res, 405, { error: tr('método não permitido') });
+      return true;
+    }
+    const pty = /^\/api\/pty\/([^/]+)\/(stream|input|resize|close)$/.exec(path);
+    const act = /^\/api\/agents\/([^/]+)\/(stop|takeover)$/.exec(path);
+    if (pty || act) {
+      const m = (pty ?? act)!;
+      const id = splitId(decodeURIComponent(m[1]));
+      if (!id || id.member !== who.id) {
+        req.resume();
+        sendJson(res, 403, { error: tr('só dá para comandar o próprio computador') });
+        return true;
+      }
+      if (!control()) return true;
+      const local = pty ? `/api/pty/${encodeURIComponent(id.id)}/${m[2]}` : `/api/agents/${encodeURIComponent(id.id)}/${m[2]}`;
+      if (pty && m[2] === 'stream') {
+        tunnel(res, who.id, { method: 'GET', path: local }, { sse: { event: '-', map: (d) => d } });
+        return true;
+      }
+      if (method !== 'POST') {
+        req.resume();
+        sendJson(res, 405, { error: tr('método não permitido') });
+        return true;
+      }
+      readJson<unknown>(req)
+        .catch(() => ({}))
+        .then((body) => tunnel(res, who.id, { method: 'POST', path: local, body }, { json: (d) => (act && d && typeof d === 'object' && 'id' in (d as object) ? mapPty(who.id, d as PtyInfo) : d) }));
+      return true;
+    }
+    if (path === '/api/spawn/folders' && method === 'GET') {
+      if (!control()) return true;
+      tunnel(res, who.id, { method: 'GET', path: '/api/spawn/folders' });
       return true;
     }
 

@@ -3,7 +3,7 @@
 //   npm run dev    -> tsx server/index.ts --dev (Vite em middleware mode, HMR no mesmo servidor)
 //   npm start      -> node dist/server/index.js (serve dist/client)
 import http from 'node:http';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { codexDirsRefused, isDefaultDir } from './accounts/detect';
 import { AccountsService } from './accounts/service';
 import { isTruthy, loadConfig, messagesOffReason, terminalOffReason, worldSocketUrl } from './config';
@@ -80,7 +80,7 @@ const roomAliases = new RoomAliases(join(config.dataDir, 'rooms.json'));
 roomAliases.load();
 
 // Office, contas e fontes de agentes se referenciam (avisos de mudança / fontes): ligação tardia.
-const late: { office?: Office; agents?: SourceSet; permissions?: PermissionRegistry; messages?: MessageRegistry; ptys?: PtyManager; ptyOff?: string } = {};
+const late: { ptyProviders?: ('claude' | 'codex')[]; office?: Office; agents?: SourceSet; permissions?: PermissionRegistry; messages?: MessageRegistry; ptys?: PtyManager; ptyOff?: string } = {};
 // Versão nova: consulta a release mais recente no GitHub a cada 6 h (HABBLAUD_UPDATE_CHECK=0 desliga).
 const updates = new UpdateChecker({
   current: config.version,
@@ -127,7 +127,7 @@ const office = new Office({
   terminal: config.terminal,
   permissions: () => late.permissions?.snapshot() ?? new Map(),
   messages: config.messages ? () => late.messages?.reachable() ?? new Set() : undefined,
-  ptys: () => (late.ptys ? { status: late.ptys.status(), list: late.ptys.list() } : { status: { enabled: false, reason: late.ptyOff ?? tr('desligado') }, list: [] }),
+  ptys: () => (late.ptys ? { status: { ...late.ptys.status(), providers: late.ptyProviders }, list: late.ptys.list() } : { status: { enabled: false, reason: late.ptyOff ?? tr('desligado') }, list: [] }),
   updates: () => updates.status(),
   world: () => world?.meta() ?? { enabled: false, configured: false, state: 'off' },
 });
@@ -283,14 +283,16 @@ late.messages = messages;
 // do Docker, com node-pty e o executável do claude no PATH.
 const claudeBinSetting = process.env.HABBLAUD_CLAUDE_BIN?.trim();
 const claudeBin = claudeBinFrom();
+// O terminal interativo também abre o Codex (sessão nova e login), quando ele está neste computador.
+const ptyCodexBin = !config.inDocker && config.codex ? findCodexBin(process.env) : undefined;
 let spawnPty: SpawnPty | null = null;
 let ptyScreen: ScreenFactory | undefined;
 let ptyOff: string | undefined;
 if (!ptyOptIn) ptyOff = ptyFlag ? tr('desligado por HABBLAUD_PTY={0}', [ptyFlag]) : tr('desligado (ligue com HABBLAUD_PTY=1)');
 else if (config.inDocker) ptyOff = tr('indisponível no Docker (rode com npm start)');
 else if (!config.terminal) ptyOff = tr('mesma trava do terminal ({0})', [terminalOffReason(process.env, config.host, config.inDocker)]);
-else if (!claudeBin) ptyOff = claudeBinSetting ? tr('HABBLAUD_CLAUDE_BIN não encontrado no PATH ({0})', [claudeBinSetting]) : tr('executável "claude" não encontrado no PATH (defina HABBLAUD_CLAUDE_BIN)');
-else if (!isExecutableFile(claudeBin)) ptyOff = tr('o executável do Claude Code não roda: {0} (confira o HABBLAUD_CLAUDE_BIN)', [claudeBin]);
+else if (!claudeBin && !ptyCodexBin) ptyOff = claudeBinSetting ? tr('HABBLAUD_CLAUDE_BIN não encontrado no PATH ({0})', [claudeBinSetting]) : tr('executável "claude" não encontrado no PATH (defina HABBLAUD_CLAUDE_BIN)');
+else if (claudeBin && !ptyCodexBin && !isExecutableFile(claudeBin)) ptyOff = tr('o executável do Claude Code não roda: {0} (confira o HABBLAUD_CLAUDE_BIN)', [claudeBin]);
 else {
   const loaded = await loadPty();
   spawnPty = loaded.spawn;
@@ -306,6 +308,12 @@ const ptys = spawnPty
       spawn: spawnPty,
       claudeBin: claudeBin ?? 'claude',
       accounts: () => accounts.entries().map((a) => ({ id: a.id, dir: a.dir, isDefault: isDefaultDir(a.dir, config.home) })),
+      codexBin: ptyCodexBin,
+      codexAccounts: () =>
+        accounts.entriesOf('codex').map((a) => {
+          const dir = a.detected.configDir;
+          return { id: a.id, dir, isDefault: resolvePath(dir) === resolvePath(join(config.home, '.codex')) };
+        }),
       agent: (id) => {
         const a = office.get(id);
         return a && { id: a.id, kind: a.kind, account: a.account, sessionId: a.sessionId, cwd: office.roomPath(a.roomId) };
@@ -315,6 +323,28 @@ const ptys = spawnPty
     })
   : undefined;
 late.ptys = ptys;
+late.ptyProviders = [...(claudeBin && isExecutableFile(claudeBin) ? (['claude'] as const) : []), ...(ptyCodexBin ? (['codex'] as const) : [])];
+// Terminal do Codex aberto aqui: liga à conversa que ele abriu (a primeira conversa nova do Codex na mesma conta e
+// pasta, começada depois do terminal), para a página saber de que agente é cada terminal.
+if (ptys && ptyCodexBin) {
+  const linker = setInterval(() => {
+    const open = ptys.unlinked();
+    if (!open.length) return;
+    const taken = new Set(ptys.list().map((p) => p.agentId));
+    for (const p of open) {
+      const match = office
+        .list()
+        .filter((a) => a.provider === 'codex' && a.kind === 'main' && a.account === p.account && !taken.has(a.id) && a.startedAt >= p.startedAt - 5_000)
+        .filter((a) => resolvePath(office.roomPath(a.roomId) ?? '') === resolvePath(p.cwd))
+        .sort((a, b) => a.startedAt - b.startedAt)[0];
+      if (match) {
+        ptys.link(p.id, match.id);
+        taken.add(match.id);
+      }
+    }
+  }, 1_000);
+  linker.unref?.();
+}
 late.ptyOff = ptyOff;
 
 if (config.demo) office.setDemo(true);
@@ -341,6 +371,7 @@ const central = centralCfg.config
       current: () => hub.current(),
       onSnapshot: (cb) => hub.onSnapshot(cb),
       onFeed: (cb) => hub.onFeed(cb),
+      caps: () => ({ pty: !!ptys, providers: late.ptyProviders ?? [] }),
       log,
     })
   : undefined;

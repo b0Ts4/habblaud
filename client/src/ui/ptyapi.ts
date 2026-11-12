@@ -27,9 +27,16 @@ export async function postPty<T = unknown>(url: string, body: unknown): Promise<
 
 const SIZE = { cols: 120, rows: 32 };
 
-/** Sessão nova do Claude Code na pasta (e conta) indicada. */
-export function createPty(cwd: string, account?: string): Promise<PtyInfo | undefined> {
-  return postPty<PtyInfo>('/api/pty', { cwd, account, ...SIZE });
+/** Como abrir: ferramenta, pedido inicial ou o terminal de login da conta. */
+export interface NewPtyOptions {
+  provider?: 'claude' | 'codex';
+  prompt?: string;
+  login?: boolean;
+}
+
+/** Sessão nova (Claude Code ou Codex) na pasta (e conta) indicada. */
+export function createPty(cwd: string, account?: string, opts: NewPtyOptions = {}): Promise<PtyInfo | undefined> {
+  return postPty<PtyInfo>('/api/pty', { cwd, account, ...opts, ...SIZE });
 }
 
 /** Encerra a sessão noutro terminal e continua a mesma conversa aqui. */

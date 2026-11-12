@@ -10,8 +10,21 @@ import { tr } from '../../shared/i18n';
 import type { FeedItem, Notice, OfficeSnapshot } from '../../shared/types';
 import { errMsg } from '../log';
 
-export type CentralFeature = 'terminal' | 'messages' | 'permissions';
-export const DEFAULT_CENTRAL_ALLOW: readonly CentralFeature[] = ['terminal', 'messages'];
+/**
+ * terminal: ver a conversa; messages: mandar mensagens; permissions: responder pedidos; control: abrir agentes novos,
+ * digitar no terminal interativo e encerrar agentes neste computador (comandar o computador pela sede).
+ */
+export type CentralFeature = 'terminal' | 'messages' | 'permissions' | 'control';
+export const DEFAULT_CENTRAL_ALLOW: readonly CentralFeature[] = ['terminal', 'messages', 'permissions', 'control'];
+
+/** O que este computador oferece à sede (vai junto com o estado). */
+export interface CentralCaps {
+  allow: CentralFeature[];
+  /** Terminal interativo ligado aqui (HABBLAUD_PTY=1, node-pty). */
+  pty: boolean;
+  /** Ferramentas instaladas aqui para abrir agentes novos. */
+  providers: ('claude' | 'codex')[];
+}
 
 export interface CentralUplinkConfig {
   /** Endereço da sede (https://...). */
@@ -39,7 +52,7 @@ export function parseCentralUplink(env: NodeJS.ProcessEnv): { config?: CentralUp
   const allow = new Set<CentralFeature>();
   const list = env.HABBLAUD_CENTRAL_ALLOW?.trim();
   for (const f of list === undefined || list === '' ? DEFAULT_CENTRAL_ALLOW : list.split(',').map((s) => s.trim())) {
-    if (f === 'terminal' || f === 'messages' || f === 'permissions') allow.add(f);
+    if (f === 'terminal' || f === 'messages' || f === 'permissions' || f === 'control') allow.add(f);
   }
   return { config: { url: url.origin, token, allow } };
 }
@@ -60,6 +73,13 @@ const ROUTES: { method: 'GET' | 'POST'; re: RegExp; needs: CentralFeature | null
   { method: 'GET', re: /^\/api\/messages\/[^/]+$/, needs: 'messages' },
   { method: 'GET', re: /^\/api\/permissions\/[^/]+$/, needs: 'permissions' },
   { method: 'POST', re: /^\/api\/permissions\/[^/]+\/decision$/, needs: 'permissions' },
+  // Comandar o computador: terminal interativo (abrir, ver, digitar, encerrar) e agentes (encerrar, assumir).
+  { method: 'GET', re: /^\/api\/pty$/, needs: 'control' },
+  { method: 'POST', re: /^\/api\/pty$/, needs: 'control' },
+  { method: 'GET', re: /^\/api\/pty\/[^/]+\/stream$/, needs: 'control' },
+  { method: 'POST', re: /^\/api\/pty\/[^/]+\/(input|resize|close)$/, needs: 'control' },
+  { method: 'POST', re: /^\/api\/agents\/[^/]+\/(stop|takeover)$/, needs: 'control' },
+  { method: 'GET', re: /^\/api\/spawn\/folders$/, needs: 'control' },
 ];
 
 /** null = pode; senão o motivo da recusa. */
@@ -122,6 +142,8 @@ export interface CentralUplinkDeps {
   /** Base da API local deste Habblaud (ex.: http://127.0.0.1:4747). */
   localBase: string;
   current: () => OfficeSnapshot;
+  /** O que este computador oferece (terminal interativo, ferramentas instaladas). */
+  caps?: () => Omit<CentralCaps, 'allow'>;
   onSnapshot: (cb: (snap: OfficeSnapshot) => void) => () => void;
   onFeed: (cb: (feed: FeedItem[], notices: Notice[]) => void) => () => void;
   log: { info: (m: string) => void; warn: (m: string) => void };
@@ -215,7 +237,8 @@ export class CentralUplink {
     this.sending = true;
     this.lastSend = Date.now();
     try {
-      const body = gzipSync(JSON.stringify({ snapshot: snapshot ?? undefined, feed, notices }));
+      const caps: CentralCaps = { allow: [...this.deps.config.allow], ...(this.deps.caps?.() ?? { pty: false, providers: [] }) };
+      const body = gzipSync(JSON.stringify({ snapshot: snapshot ?? undefined, feed, notices, caps }));
       const res = await this.fetch(`${this.deps.config.url}/central/uplink/state`, {
         method: 'POST',
         headers: this.headers({ 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' }),

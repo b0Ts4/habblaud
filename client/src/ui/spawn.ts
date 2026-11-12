@@ -131,8 +131,19 @@ export class SpawnPanel {
   private selected = '';
   private typing = false;
   private files: PendingFile[] = [];
+  /** Ferramenta do agente novo (pelo terminal interativo, que abre Claude Code ou Codex). */
+  private provider: 'claude' | 'codex' = 'claude';
+  private readonly providerLabel: HTMLElement;
+  private readonly providerRow: HTMLElement;
+  private readonly loginRow: HTMLElement;
+  private readonly hint: HTMLElement;
+  private readonly attachTools: HTMLElement;
 
   constructor(private readonly ctx: UiContext) {
+    this.providerLabel = h('p', { class: 'ui-spawn__label', text: tr('Ferramenta') });
+    this.providerRow = h('div', { class: 'ui-spawn__folders ui-spawn__providers', role: 'radiogroup', attrs: { 'aria-label': tr('Ferramenta') } });
+    this.loginRow = h('div', { class: 'ui-spawn__login' });
+    this.hint = h('p', { class: 'ui-rename__hint' });
     this.folderList = h('div', { class: 'ui-spawn__folders', role: 'radiogroup', attrs: { 'aria-label': tr('Projetos recentes') } });
     this.otherBtn = h('button', { class: 'ui-spawn__other', type: 'button', on: { click: () => this.showOther(true) } }, tr('+ Outra pasta'));
     this.folder = h('input', {
@@ -188,17 +199,20 @@ export class SpawnPanel {
       h(
         'div',
         { class: 'ui-set-group ui-spawn__body' },
+        this.providerLabel,
+        this.providerRow,
         h('p', { class: 'ui-spawn__label', attrs: { id: 'ui-spawn-folders-label' }, text: tr('Projeto') }),
         this.folderList,
         this.otherBtn,
         this.folder,
         h('label', { class: 'ui-spawn__label', attrs: { for: 'ui-spawn-prompt' }, text: tr('Pedido') }),
         this.prompt,
-        h('div', { class: 'ui-spawn__tools' }, this.dictate.el, attachBtn, this.fileInput),
+        (this.attachTools = h('div', { class: 'ui-spawn__tools' }, this.dictate.el, attachBtn, this.fileInput)),
         this.fileList,
-        h('p', { class: 'ui-rename__hint', text: tr('Começa na hora uma sessão do Claude Code em segundo plano no computador, na pasta escolhida; as permissões chegam aqui. Pasta que o Claude Code ainda não conhece abre no app do Claude e espera o Enter lá. Anexos vão para ~/.habblaud/attachments e o pedido leva os caminhos.') }),
+        this.hint,
         this.submitBtn,
         this.status,
+        this.loginRow,
       ),
     );
     this.el.addEventListener('toggle', () => {
@@ -222,6 +236,7 @@ export class SpawnPanel {
     if (!this.folders.length) this.setFolders(spawnFolders(this.ctx.store.snapshot).map((path) => ({ path, name: path.split(/[\\/]/).pop() || path, lastAt: 0 })));
     void this.loadFolders();
     void this.checkDictation();
+    this.renderTools();
     if (!this.busy) setText(this.status, '');
     const r = anchor.getBoundingClientRect();
     this.el.style.top = `${Math.round(r.bottom + 8)}px`;
@@ -238,6 +253,60 @@ export class SpawnPanel {
     if (typeof this.el.hidePopover === 'function' && this.isOpen) this.el.hidePopover();
     this.el.classList.remove('is-open');
     this.anchor?.setAttribute('aria-expanded', 'false');
+  }
+
+  /** Pelo terminal interativo (ligado aqui ou no seu computador, pela sede): abre Claude Code ou Codex. */
+  private get interactive(): boolean {
+    return !!this.ctx.terminals?.interactiveEnabled;
+  }
+
+  private providers(): ('claude' | 'codex')[] {
+    const list = this.ctx.store.snapshot?.meta.pty?.providers;
+    return list?.length ? list : ['claude'];
+  }
+
+  private renderTools(): void {
+    const on = this.interactive;
+    const list: ('claude' | 'codex')[] = on ? this.providers() : ['claude'];
+    if (!list.includes(this.provider)) this.provider = list[0] ?? 'claude';
+    const name = (p: 'claude' | 'codex') => (p === 'codex' ? 'Codex' : 'Claude Code');
+    this.providerRow.replaceChildren(
+      ...list.map((p) =>
+        h(
+          'button',
+          { class: `ui-spawn__folder${p === this.provider ? ' is-on' : ''}`, type: 'button', role: 'radio', attrs: { 'aria-checked': String(p === this.provider) }, on: { click: () => ((this.provider = p), this.renderTools()) } },
+          h('span', { class: 'ui-spawn__folder-name', text: name(p) }),
+        ),
+      ),
+    );
+    setHidden(this.providerLabel, !on || list.length < 2);
+    setHidden(this.providerRow, !on || list.length < 2);
+    // Anexos e ditado seguem o caminho antigo (claude --bg); pelo terminal interativo, só o pedido.
+    setHidden(this.attachTools, on);
+    setText(
+      this.hint,
+      on
+        ? tr('Abre o agente no seu computador, na pasta escolhida, e ele começa pelo pedido. Ele continua rodando mesmo com esta página fechada: acompanhe pelo escritório, abra o terminal para digitar e responda as permissões por aqui (também pelo celular).')
+        : tr('Começa na hora uma sessão do Claude Code em segundo plano no computador, na pasta escolhida; as permissões chegam aqui. Pasta que o Claude Code ainda não conhece abre no app do Claude e espera o Enter lá. Anexos vão para ~/.habblaud/attachments e o pedido leva os caminhos.'),
+    );
+    this.loginRow.replaceChildren(
+      ...(on
+        ? [
+            h('span', { class: 'ui-muted', text: tr('Conectar conta no seu computador:') }),
+            ...list.map((p) => h('button', { class: 'ui-btn', type: 'button', on: { click: () => void this.login(p) } }, name(p))),
+          ]
+        : []),
+    );
+  }
+
+  /** Abre o login da ferramenta num terminal (Codex: link e código para autorizar, dá para fazer pelo celular). */
+  private async login(provider: 'claude' | 'codex'): Promise<void> {
+    try {
+      await this.ctx.terminals?.newSession('', undefined, { provider, login: true });
+      this.hide();
+    } catch (err) {
+      this.say(tr('Não abriu: {0}', [(err as Error).message]), true);
+    }
   }
 
   private async loadFolders(): Promise<void> {
@@ -354,6 +423,23 @@ export class SpawnPanel {
     if (!folder) return this.say(tr('Escolha o projeto.'), true);
     this.busy = true;
     this.submitBtn.disabled = true;
+    if (this.interactive) {
+      try {
+        this.say(tr('Começando no computador…'));
+        await this.ctx.terminals?.newSession(folder, undefined, { provider: this.provider, prompt: this.prompt.value.trim() || undefined });
+        this.prompt.value = '';
+        writePref(folder);
+        this.say(tr('Rodando: o agente começou no computador e aparece no escritório em instantes.'));
+        this.ctx.announce(tr('Agente novo rodando.'));
+        this.hide();
+      } catch (err) {
+        this.say(tr('Não abriu: {0}', [(err as Error).message]), true);
+      } finally {
+        this.busy = false;
+        this.submitBtn.disabled = false;
+      }
+      return;
+    }
     try {
       const ids: string[] = [];
       for (const [i, f] of this.files.entries()) {

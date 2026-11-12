@@ -9,6 +9,7 @@
 //
 // Segurança: quem controla um terminal destes executa comandos na máquina. O recurso é opt-in (HABBLAUD_PTY=1),
 // as rotas só aceitam conexões do próprio computador (ver http/pty.ts) e ele fica desligado no Docker.
+import { homedir } from 'node:os';
 import { chmodSync, readFileSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createRequire } from 'node:module';
@@ -72,6 +73,10 @@ export interface PtyManagerOptions {
   disabledReason?: string;
   claudeBin: string;
   accounts: () => PtyAccount[];
+  /** Executável do Codex (ausente = terminais do Codex desligados). */
+  codexBin?: string;
+  /** Contas do Codex (CODEX_HOME de cada uma). */
+  codexAccounts?: () => PtyAccount[];
   agent: (id: string) => PtyAgentRef | undefined;
   onChange: () => void;
   env?: NodeJS.ProcessEnv;
@@ -169,6 +174,39 @@ interface SpawnPlan {
   account: PtyAccount;
   cols: number;
   rows: number;
+  provider: Provider;
+  /** Pedido inicial (a sessão começa já trabalhando nele). */
+  prompt?: string;
+  /** Terminal de login da conta (`codex login --device-auth` ou o `/login` do Claude Code). */
+  login?: boolean;
+}
+
+/** Ferramenta do terminal. */
+export type Provider = 'claude' | 'codex';
+/** Tamanho máximo do pedido inicial (vai como argumento do processo). */
+export const PTY_PROMPT_MAX = 8_000;
+
+/** O que pedir ao abrir um terminal novo (POST /api/pty). */
+export interface PtyCreate {
+  cwd: unknown;
+  account?: unknown;
+  cols?: unknown;
+  rows?: unknown;
+  /** 'claude' (padrão) ou 'codex'. */
+  provider?: unknown;
+  prompt?: unknown;
+  login?: unknown;
+}
+
+/** Argumentos do processo: o pedido sempre depois de `--` (nunca vira opção nem subcomando). */
+export function ptyArgs(plan: Pick<SpawnPlan, 'provider' | 'prompt' | 'login'>, resume?: string): string[] {
+  if (plan.provider === 'codex') {
+    if (plan.login) return ['login', '--device-auth'];
+    return plan.prompt ? ['--', plan.prompt] : [];
+  }
+  if (resume) return ['--resume', resume];
+  if (plan.login) return ['--', '/login'];
+  return plan.prompt ? ['--', plan.prompt] : [];
 }
 
 export class PtyError extends Error {
@@ -222,7 +260,7 @@ export class PtyManager {
   }
 
   /** Abre uma sessão nova do Claude Code na pasta (`cwd` absoluto), na conta pedida (ou na padrão). */
-  create(p: { cwd: unknown; account?: unknown; cols?: unknown; rows?: unknown }): PtyInfo {
+  create(p: PtyCreate): PtyInfo {
     return this.spawn(this.plan(p, this.takeovers.size));
   }
 
@@ -343,6 +381,20 @@ export class PtyManager {
     pty.screen.resize(c, r);
   }
 
+  /** Terminais do Codex ainda sem a conversa ligada (ver link). */
+  unlinked(): PtyInfo[] {
+    return [...this.ptys.values()].filter((t) => t.info.provider === 'codex' && !t.info.login && !t.info.linked && t.info.exitedAt === undefined).map((t) => ({ ...t.info }));
+  }
+
+  /** Liga um terminal do Codex à conversa que ele abriu (o agente que apareceu no escritório). */
+  link(id: string, agentId: string): void {
+    const t = this.ptys.get(id);
+    if (!t || t.info.linked) return;
+    t.info.agentId = agentId;
+    t.info.linked = true;
+    this.opts.onChange();
+  }
+
   /** Encerra o processo (ainda rodando) ou tira da lista (já encerrado). */
   close(id: string): void {
     const pty = this.get(id);
@@ -370,13 +422,21 @@ export class PtyManager {
   }
 
   /** Valida o pedido de uma sessão nova (`reserved`: vagas já prometidas a tomadas em andamento). */
-  private plan(p: { cwd: unknown; account?: unknown; cols?: unknown; rows?: unknown }, reserved = 0): SpawnPlan {
+  private plan(p: PtyCreate, reserved = 0): SpawnPlan {
     if (!this.opts.spawn) throw new PtyError(503, tr('terminal desligado: {0}', [this.opts.disabledReason ?? tr('indisponível')]));
+    const provider: Provider = p.provider === 'codex' ? 'codex' : 'claude';
     // Antes de tudo (o "assumir" encerra a sessão de lá depois daqui): um claude que não roda abriria um terminal que
     // sai na hora.
-    if (!isExecutableFile(this.opts.claudeBin)) throw new PtyError(503, tr('o executável do Claude Code não roda: {0} (confira o HABBLAUD_CLAUDE_BIN)', [this.opts.claudeBin]));
-    if (typeof p.cwd !== 'string' || !isAbsolute(p.cwd)) throw new PtyError(400, tr('informe a pasta do projeto (caminho absoluto)'));
-    const cwd = resolve(p.cwd);
+    if (provider === 'codex') {
+      if (!this.opts.codexBin) throw new PtyError(503, tr('Codex não encontrado neste computador (instale o Codex CLI ou defina HABBLAUD_CODEX_BIN)'));
+    } else if (!isExecutableFile(this.opts.claudeBin)) throw new PtyError(503, tr('o executável do Claude Code não roda: {0} (confira o HABBLAUD_CLAUDE_BIN)', [this.opts.claudeBin]));
+    if (p.prompt !== undefined && (typeof p.prompt !== 'string' || p.prompt.length > PTY_PROMPT_MAX)) throw new PtyError(400, tr('pedido inválido ou grande demais (máximo de {0} caracteres)', [PTY_PROMPT_MAX]));
+    const prompt = typeof p.prompt === 'string' && p.prompt.trim() ? p.prompt.trim() : undefined;
+    const login = p.login === true;
+    // O login não depende de projeto: sem pasta, abre na pasta pessoal.
+    const rawCwd = login && (p.cwd === undefined || p.cwd === '') ? homedir() : p.cwd;
+    if (typeof rawCwd !== 'string' || !isAbsolute(rawCwd)) throw new PtyError(400, tr('informe a pasta do projeto (caminho absoluto)'));
+    const cwd = resolve(rawCwd);
     let isDir = false;
     try {
       isDir = statSync(cwd).isDirectory();
@@ -384,12 +444,15 @@ export class PtyManager {
       // tratado abaixo
     }
     if (!isDir) throw new PtyError(400, tr('pasta não encontrada: {0}', [cwd]));
-    const accounts = this.opts.accounts();
-    const account = typeof p.account === 'string' ? accounts.find((a) => a.id === p.account) : (accounts.find((a) => a.isDefault) ?? accounts[0]);
+    const accounts = provider === 'codex' ? (this.opts.codexAccounts?.() ?? []) : this.opts.accounts();
+    // Nenhuma conta detectada ainda (a pessoa nunca usou a ferramenta neste computador, ou vai fazer o login agora):
+    // a pasta padrão da ferramenta.
+    const fallback: PtyAccount | undefined = !accounts.length && p.account === undefined ? { id: provider === 'codex' ? '.codex' : '.claude', dir: '', isDefault: true } : undefined;
+    const account = typeof p.account === 'string' ? accounts.find((a) => a.id === p.account) : (accounts.find((a) => a.isDefault) ?? accounts[0] ?? fallback);
     if (!account) throw new PtyError(400, tr('conta desconhecida'));
     const running = [...this.ptys.values()].filter((t) => t.info.exitedAt === undefined).length;
     if (running + Math.max(0, reserved) >= MAX_PTYS) throw new PtyError(429, tr('limite de {0} terminais abertos', [MAX_PTYS]));
-    return { cwd, account, cols: clampInt(p.cols, 20, 400, 100), rows: clampInt(p.rows, 5, 200, 30) };
+    return { cwd, account, cols: clampInt(p.cols, 20, 400, 100), rows: clampInt(p.rows, 5, 200, 30), provider, prompt, login };
   }
 
   private spawn(plan: SpawnPlan, p: { resume?: string; from?: string } = {}): PtyInfo {
@@ -398,18 +461,25 @@ export class PtyManager {
     const { cwd, account, cols, rows } = plan;
     const env: NodeJS.ProcessEnv = { ...(this.opts.env ?? process.env), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
     for (const k of INHERITED_SESSION_VARS) delete env[k];
-    if (account.isDefault) delete env.CLAUDE_CONFIG_DIR;
+    const codex = plan.provider === 'codex';
+    if (codex) {
+      if (account.isDefault) delete env.CODEX_HOME;
+      else env.CODEX_HOME = account.dir;
+    } else if (account.isDefault) delete env.CLAUDE_CONFIG_DIR;
     else env.CLAUDE_CONFIG_DIR = account.dir;
 
     let proc: PtyProcess;
     try {
-      const args = p.resume ? ['--resume', p.resume] : [];
-      proc = spawn(this.opts.claudeBin, args, { cwd, cols, rows, env });
+      proc = spawn(codex ? this.opts.codexBin! : this.opts.claudeBin, ptyArgs(plan, p.resume), { cwd, cols, rows, env });
     } catch (err) {
-      throw new PtyError(500, tr('não consegui abrir o Claude Code: {0}', [errMsg(err)]));
+      throw new PtyError(500, codex ? tr('não consegui abrir o Codex: {0}', [errMsg(err)]) : tr('não consegui abrir o Claude Code: {0}', [errMsg(err)]));
     }
     const id = `p${++this.seq}-${proc.pid}`;
-    const info: PtyInfo = { id, pid: proc.pid, cwd, account: account.id, agentId: `${account.id}:${proc.pid}`, startedAt: this.now() };
+    // O agente do Claude Code é "<conta>:<pid>". O do Codex é "<conta>:<thread>", que só aparece depois (o Codex roda
+    // as conversas num processo à parte): até link() achar a conversa, fica um id provisório.
+    const info: PtyInfo = { id, pid: proc.pid, cwd, account: account.id, agentId: codex ? `${account.id}:${id}` : `${account.id}:${proc.pid}`, startedAt: this.now() };
+    if (codex) info.provider = 'codex';
+    if (plan.login) info.login = true;
     if (p.resume) info.resumed = p.resume;
     if (p.from) info.fromAgent = p.from;
     const pty: Pty = { info, proc, screen: this.createScreen(cols, rows), clients: new Set(), pending: new Map() };

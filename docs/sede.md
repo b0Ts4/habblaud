@@ -22,10 +22,13 @@ para a sede, e a sede mostra todo mundo junto, com login por pessoa.
   do membro por baixo (`ana~...`), então nada colide entre computadores.
 - **Terminal ao vivo de qualquer agente**, pela página da sede, conforme a política (abaixo).
 - **Mensagens e pedidos de permissão** pelo túnel, também conforme a política.
+- **Comandar o próprio computador pelo navegador ou pelo celular**: abrir agentes novos (Claude Code ou Codex), digitar
+  no terminal deles, conectar as contas e encerrar agentes. Ninguém precisa abrir o Claude nem o Codex no computador:
+  o Habblaud local abre e mantém os agentes rodando, mesmo com a página fechada.
 
 ## Subir a sede
 
-Num servidor do time (ou numa máquina qualquer que todos alcancem):
+Num servidor do time (uma VPS, por exemplo; a sede não roda agentes, então gasta pouca memória):
 
 ```bash
 git clone https://github.com/b0Ts4/habblaud.git && cd habblaud
@@ -54,6 +57,22 @@ frente (Caddy, nginx, Cloudflare Tunnel, Tailscale...) e libere o nome dele:
 HABBLAUD_ALLOWED_HOSTS=habblaud.suaempresa.com npm run start:central
 ```
 
+Exemplo com o **Caddy** (HTTPS automático) numa VPS Linux (Hostinger, por exemplo), com o domínio
+`habblaud.suaempresa.com` apontando para o IP dela:
+
+```bash
+sudo apt install -y caddy
+echo 'habblaud.suaempresa.com {
+  reverse_proxy 127.0.0.1:4800 {
+    flush_interval -1
+  }
+}' | sudo tee /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+HABBLAUD_CENTRAL_HOST=127.0.0.1 HABBLAUD_ALLOWED_HOSTS=habblaud.suaempresa.com npm run start:central
+```
+
+Para a sede subir sozinha com a VPS, use um serviço do systemd (ou `pm2`) rodando o mesmo comando.
+
 > O proxy precisa repassar **corpo de requisição em fluxo, sem buffer** (o terminal ao vivo volta assim). No nginx:
 > `proxy_request_buffering off; proxy_buffering off; proxy_read_timeout 1d;` nos `location /`. O Caddy já faz isso.
 
@@ -75,10 +94,14 @@ No computador de cada um (Windows, Linux ou macOS), no `.env` do Habblaud ou no 
 ```bash
 HABBLAUD_CENTRAL_URL=https://habblaud.suaempresa.com
 HABBLAUD_CENTRAL_TOKEN=hbs_...        # o token que o central:member mostrou
-HABBLAUD_CENTRAL_ALLOW=terminal,messages
+HABBLAUD_PTY=1                        # deixa a sede abrir e comandar agentes neste computador
+HABBLAUD_WORLD=0                      # nada da empresa vai para o Habblaud World público
 ```
 
-e suba o Habblaud como sempre (`npm start` ou `npm run docker:up`). O log mostra `Sede: conectado a ...`.
+e suba o Habblaud **com `npm start`** (fora do Docker: o terminal interativo precisa rodar no próprio computador, onde
+estão o Claude Code, o Codex e os projetos). O log mostra `Sede: conectado a ...` e `Terminal interativo: ligado`.
+Precisa do Claude Code e/ou do Codex CLI instalados (`npm i -g @anthropic-ai/claude-code @openai/codex`); não precisa
+abrir nenhum dos dois.
 
 `HABBLAUD_CENTRAL_ALLOW` é a palavra final **de quem é dono do computador** sobre o que a sede pode fazer ali, seja
 qual for a política da sede:
@@ -88,11 +111,31 @@ qual for a política da sede:
 | `terminal` | ver a conversa ao vivo dos agentes deste computador |
 | `messages` | mandar mensagens aos agentes daqui (como se digitadas no terminal) |
 | `permissions` | aprovar/recusar pedidos de permissão dos agentes daqui |
+| `control` | abrir agentes novos, digitar no terminal deles, fazer login das contas e encerrar agentes (só pelo dono) |
 
-O padrão é `terminal,messages`. Detalhes de agente (o histórico que o escritório já mostra) vão sempre. Nada além
+O padrão é `terminal,messages,permissions,control`. Detalhes de agente (o histórico que o escritório já mostra) vão sempre. Nada além
 dessas rotas passa pelo túnel: terminal interativo, Novo agente, arquivos e o Habblaud World ficam de fora.
 
 > Para uso no escritório, desligue o Habblaud World público: `HABBLAUD_WORLD=0`.
+
+## Comandar o computador pela web (e pelo celular)
+
+Com `HABBLAUD_PTY=1` e `control` liberado, a página da sede, logada como você, comanda **o seu** computador:
+
+- **Novo agente** (botão na barra do topo): escolha **Claude Code** ou **Codex**, o projeto e o pedido. O agente abre
+  no seu computador, já trabalhando no pedido, e continua rodando com a página fechada. Acompanhe pelo escritório,
+  responda as permissões e mande mensagens; o terminal dele abre por cima para digitar (no celular, em tela cheia).
+- **Conectar conta** (no fim da janela Novo agente): abre o login da ferramenta num terminal. No Codex é o login por
+  código (`codex login --device-auth`): aparece um link e um código, que dá para autorizar pelo celular com a conta do
+  ChatGPT. No Claude Code é o `/login`. Quem tem as duas contas conecta as duas. As credenciais ficam só no seu
+  computador; a sede nunca as vê.
+- **Encerrar** e **Assumir daqui** (Claude Code), como no Habblaud local.
+
+O terminal interativo é sempre só do dono: nem administrador digita no computador de outra pessoa pela sede. A sede
+confere isso em cada pedido, e o seu computador confere de novo o `control` no `HABBLAUD_CENTRAL_ALLOW`.
+
+> Primeira vez com o Codex neste computador? Depois do primeiro login, reinicie o Habblaud local para ele passar a
+> mostrar as conversas do Codex no escritório.
 
 ## Política: quem faz o quê com os agentes dos outros
 
@@ -122,6 +165,7 @@ novo em cada pedido, e o computador do dono confere mais uma vez contra o `HABBL
 
 ## Próximos passos (planejados)
 
+- **Anexos e ditado** no Novo agente pela sede (hoje só o pedido em texto).
 - **Agentes conversando entre si**, entre computadores, pela sede (`list`, `ask`, `check`, no estilo do Maestri).
 - **Gateway do sistema**: acesso dos agentes ao sistema da empresa (Postgres com RLS por `tenant_id` e navegador
   controlado), com regras por tenant e papel, aprovação humana e auditoria.

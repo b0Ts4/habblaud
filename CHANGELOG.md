@@ -18,6 +18,16 @@ do meio (0.**3**.0).
   pela mesma conexão (saindo do computador, nada exposto), os pedidos de terminal ao vivo, mensagens e permissões que
   a pessoa liberar em `HABBLAUD_CENTRAL_ALLOW`. Quem faz o quê com os agentes dos outros segue a política da sede
   (`npm run central:member -- policy ...`). Guia: [docs/sede.md](docs/sede.md).
+- **Comandar o próprio computador pela sede, também pelo celular.** Com `HABBLAUD_PTY=1`, o Novo agente da sede abre
+  **Claude Code ou Codex** no computador da pessoa, já trabalhando no pedido, e o terminal dele abre na página para
+  digitar (em tela cheia no celular). **Conectar conta** abre o login da ferramenta (no Codex, link e código para
+  autorizar pelo celular). Só o dono comanda o próprio computador.
+- **Terminal interativo com o Codex.** Além do Claude Code, o terminal interativo abre o Codex (sessão nova, com pedido
+  inicial, ou o login da conta), e a conversa nova do Codex é ligada ao terminal sozinha.
+
+### Corrigido
+
+- **Celular: o terminal interativo ficava atrás da barra superior.** Agora ocupa a tela inteira, como o terminal ao vivo.
 
 ## [1.0.3] - 2026-10-16
 

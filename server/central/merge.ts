@@ -11,9 +11,11 @@ import type {
   OfficeSnapshot,
   OutboxMessage,
   PermissionRequestInfo,
+  PtyInfo,
   RoomInfo,
   TerminalInit,
 } from '../../shared/types';
+import { tr } from '../../shared/i18n';
 
 /** Separador entre o membro e o id local. Não aparece em ids de membro (ver MEMBER_ID). */
 export const SEP = '~';
@@ -40,6 +42,17 @@ export interface MemberState {
   /** Nome exibido (ex.: "Bruno"). */
   name: string;
   snapshot: OfficeSnapshot;
+  /** O que o computador do membro oferece à sede (central/uplink.ts, CentralCaps). */
+  caps?: { allow: string[]; pty: boolean; providers: string[] };
+}
+
+export function mapPty(member: string, p: PtyInfo): PtyInfo {
+  return { ...p, id: g(member, p.id), agentId: g(member, p.agentId), account: g(member, p.account), fromAgent: p.fromAgent === undefined ? undefined : g(member, p.fromAgent) };
+}
+
+/** O computador da pessoa aceita ser comandado pela sede (terminal interativo e agentes novos). */
+export function canControl(m: MemberState | undefined): boolean {
+  return !!m?.caps?.pty && m.caps.allow.includes('control');
 }
 
 /** Regras de quem vê e faz o quê na sede, do ponto de vista de quem está olhando. */
@@ -182,7 +195,19 @@ export function mergeSnapshots(members: readonly MemberState[], opts: MergeOptio
  * O mesmo escritório visto por uma pessoa: o que ela não pode fazer com os agentes dos outros some (mensagem e
  * pedido de permissão respondível), para a página não oferecer o que a sede vai recusar.
  */
-export function personalize(snap: OfficeSnapshot, who: ViewerRights): OfficeSnapshot {
+export function personalize(snap: OfficeSnapshot, who: ViewerRights, mine?: MemberState): OfficeSnapshot {
+  // O terminal interativo é só do próprio computador: cada um vê e comanda os seus (nunca os dos outros).
+  const control = canControl(mine);
+  snap = {
+    ...snap,
+    ptys: control && mine ? (mine.snapshot.ptys ?? []).map((p) => mapPty(mine.id, p)) : [],
+    meta: {
+      ...snap.meta,
+      pty: control
+        ? { enabled: true, providers: (mine?.caps?.providers ?? []).filter((p): p is 'claude' | 'codex' => p === 'claude' || p === 'codex') }
+        : { enabled: false, reason: mine?.caps?.pty ? tr('o seu computador não libera "control" para a sede (HABBLAUD_CENTRAL_ALLOW)') : tr('ligue o terminal interativo no seu computador (HABBLAUD_PTY=1) e conecte-o à sede') },
+    },
+  };
   if (who.messageOthers && who.answerOthers) return snap;
   const own = `${who.member}${SEP}`;
   return {

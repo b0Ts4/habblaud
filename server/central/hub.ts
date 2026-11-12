@@ -59,7 +59,7 @@ export class CentralHub {
   }
 
   current(who: ViewerRights): OfficeSnapshot {
-    return personalize({ ...this.snapshot, serverTime: Date.now() }, who);
+    return personalize({ ...this.snapshot, serverTime: Date.now() }, who, this.members.state(who.member));
   }
 
   attach(req: IncomingMessage, res: ServerResponse, who: ViewerRights): void {
@@ -106,8 +106,9 @@ export class CentralHub {
     const feed = this.pendingFeed.splice(0);
     const notices = this.pendingNotices.splice(0);
     if (feed.length) this.feed = [...this.feed, ...feed].slice(-FEED_KEEP);
+    const mine = new Map(this.members.states().map((m) => [m.id, m]));
     for (const c of this.clients) {
-      this.write(c, frame('snapshot', personalize(this.snapshot, c.who)));
+      this.write(c, frame('snapshot', personalize(this.snapshot, c.who, mine.get(c.who.member))));
       if (feed.length) this.write(c, frame('feed', feed));
       for (const { member, n } of notices) if (member === c.who.member) this.write(c, frame('notice', n));
     }

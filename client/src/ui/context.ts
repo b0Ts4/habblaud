@@ -1,4 +1,5 @@
 // Contexto compartilhado entre os componentes da interface.
+import type { NewPtyOptions } from './ptyapi';
 import type { AccountInfo, AgentInfo } from '../../../shared/types';
 import type { OfficeStore } from '../net/store';
 import type { Selection, WorldApi } from '../world/api';
@@ -27,7 +28,7 @@ export interface TerminalRouter {
   /** Terminal interativo ligado (abrir sessões novas, assumir, encerrar). */
   readonly interactiveEnabled: boolean;
   /** Sessão nova do Claude Code na pasta, aberta no terminal interativo. */
-  newSession(cwd: string, account?: string): Promise<void>;
+  newSession(cwd: string, account?: string, opts?: NewPtyOptions): Promise<void>;
 }
 
 export type HelpSection = 'usage' | 'codex';

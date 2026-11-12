@@ -42,11 +42,19 @@ interface Link {
   commands?: ServerResponse;
   lastSeen: number;
   snapshot?: OfficeSnapshot;
+  caps?: MemberCaps;
   pending: Map<string, Pending>;
+}
+
+export interface MemberCaps {
+  allow: string[];
+  pty: boolean;
+  providers: string[];
 }
 
 export interface MemberUpdate {
   snapshot?: OfficeSnapshot;
+  caps?: MemberCaps;
   feed?: FeedItem[];
   notices?: Notice[];
 }
@@ -75,10 +83,14 @@ export class Members {
   }
 
   /** Membros com escritório conhecido: id, nome e o último snapshot. */
-  states(): { id: string; name: string; snapshot: OfficeSnapshot }[] {
-    const out: { id: string; name: string; snapshot: OfficeSnapshot }[] = [];
-    for (const [id, l] of this.links) if (l.snapshot) out.push({ id, name: l.name, snapshot: l.snapshot });
+  states(): { id: string; name: string; snapshot: OfficeSnapshot; caps?: MemberCaps }[] {
+    const out: { id: string; name: string; snapshot: OfficeSnapshot; caps?: MemberCaps }[] = [];
+    for (const [id, l] of this.links) if (l.snapshot) out.push({ id, name: l.name, snapshot: l.snapshot, caps: l.commands ? l.caps : undefined });
     return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  state(id: string): { id: string; name: string; snapshot: OfficeSnapshot; caps?: MemberCaps } | undefined {
+    return this.states().find((m) => m.id === id);
   }
 
   online(id: string): boolean {
@@ -122,6 +134,7 @@ export class Members {
     const l = this.link(id, name);
     l.lastSeen = this.now();
     if (u.snapshot) l.snapshot = u.snapshot;
+    if (u.caps) l.caps = u.caps;
     for (const cb of this.listeners) cb(id, u);
   }
 

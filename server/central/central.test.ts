@@ -6,6 +6,7 @@ import { CentralSessions } from './auth';
 import { allowed, hashToken, memberByToken, parseCentralFile } from './config';
 import { globalId, mergeSnapshots, personalize, SlotAllocator, splitId, type MemberState } from './merge';
 import { checkCommand, parseCentralUplink, readSse } from './uplink';
+import { ptyArgs } from '../pty/manager';
 
 const HASH = 'scrypt:10:8:1:AAAAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
@@ -144,7 +145,8 @@ describe('uplink', () => {
     expect(checkCommand({ id: 'x', method: 'GET', path: '/api/agents/a' }, allow)).toBeNull();
     expect(checkCommand({ id: 'x', method: 'GET', path: '/api/agents/a/terminal' }, allow)).toBeNull();
     expect(checkCommand({ id: 'x', method: 'POST', path: '/api/messages' }, allow)).toMatch(/messages/);
-    expect(checkCommand({ id: 'x', method: 'POST', path: '/api/pty' }, allow)).toMatch(/não repassa/);
+    expect(checkCommand({ id: 'x', method: 'POST', path: '/api/pty' }, allow)).toMatch(/control/);
+    expect(checkCommand({ id: 'x', method: 'POST', path: '/api/world/cmd' }, allow)).toMatch(/não repassa/);
     expect(checkCommand({ id: 'x', method: 'GET', path: '/api/agents/a/../../world' }, allow)).toMatch(/não repassa/);
   });
 
@@ -155,7 +157,7 @@ describe('uplink', () => {
     const ok = parseCentralUplink({ HABBLAUD_CENTRAL_URL: 'https://sede.x/', HABBLAUD_CENTRAL_TOKEN: 't', HABBLAUD_CENTRAL_ALLOW: 'terminal,permissions,xyz' });
     expect(ok.config?.url).toBe('https://sede.x');
     expect([...ok.config!.allow]).toEqual(['terminal', 'permissions']);
-    expect([...parseCentralUplink({ HABBLAUD_CENTRAL_URL: 'http://localhost:4800', HABBLAUD_CENTRAL_TOKEN: 't' }).config!.allow]).toEqual(['terminal', 'messages']);
+    expect([...parseCentralUplink({ HABBLAUD_CENTRAL_URL: 'http://localhost:4800', HABBLAUD_CENTRAL_TOKEN: 't' }).config!.allow]).toEqual(['terminal', 'messages', 'permissions', 'control']);
   });
 
   it('lê SSE em pedaços', async () => {
@@ -182,5 +184,35 @@ describe('sseRewriter', () => {
     const text = out.join('');
     expect(text).toContain('"agentId":"m~a1"');
     expect(text).toContain('data: [{"agentId":"x"}]');
+  });
+});
+
+describe('comandar o computador pela sede', () => {
+  it('argumentos de cada ferramenta: pedido sempre depois de --', () => {
+    expect(ptyArgs({ provider: 'codex', prompt: '--yolo apaga tudo' })).toEqual(['--', '--yolo apaga tudo']);
+    expect(ptyArgs({ provider: 'codex', login: true })).toEqual(['login', '--device-auth']);
+    expect(ptyArgs({ provider: 'claude', prompt: 'oi' })).toEqual(['--', 'oi']);
+    expect(ptyArgs({ provider: 'claude', login: true })).toEqual(['--', '/login']);
+    expect(ptyArgs({ provider: 'claude' }, 'abc')).toEqual(['--resume', 'abc']);
+    expect(ptyArgs({ provider: 'codex' })).toEqual([]);
+  });
+
+  it('control só com o terminal interativo ligado e liberado no computador', () => {
+    expect(checkCommand({ id: 'x', method: 'POST', path: '/api/pty' }, new Set(['terminal'] as const))).toMatch(/control/);
+    expect(checkCommand({ id: 'x', method: 'POST', path: '/api/pty/p1-2/input' }, new Set(['control'] as const))).toBeNull();
+    expect(checkCommand({ id: 'x', method: 'POST', path: '/api/agents/a/stop' }, new Set(['control'] as const))).toBeNull();
+  });
+
+  it('cada pessoa vê e comanda só os terminais do próprio computador', () => {
+    const pty = { id: 'p1-9', pid: 9, cwd: '/p', account: '.codex', agentId: '.codex:p1-9', startedAt: 0, provider: 'codex' as const };
+    const ana: MemberState = { id: 'ana', name: 'Ana', snapshot: { ...snap([]), ptys: [pty] }, caps: { allow: ['control'], pty: true, providers: ['codex'] } };
+    const bia: MemberState = { id: 'bia', name: 'Bia', snapshot: snap([]), caps: { allow: ['terminal'], pty: true, providers: ['claude'] } };
+    const merged = mergeSnapshots([ana, bia], { rev: 1, now: 1, startedAt: 0, version: 'x', slots: new SlotAllocator() });
+    const asAna = personalize(merged, { member: 'ana', messageOthers: true, answerOthers: true }, ana);
+    expect(asAna.ptys?.map((p) => [p.id, p.agentId, p.account])).toEqual([['ana~p1-9', 'ana~.codex:p1-9', 'ana~.codex']]);
+    expect(asAna.meta.pty).toEqual({ enabled: true, providers: ['codex'] });
+    const asBia = personalize(merged, { member: 'bia', messageOthers: true, answerOthers: true }, bia);
+    expect(asBia.ptys).toEqual([]);
+    expect(asBia.meta.pty?.enabled).toBe(false);
   });
 });

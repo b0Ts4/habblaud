@@ -10,7 +10,7 @@ import type { UiComponent, UiContext } from './context';
 import { h, iconButton, setHidden, setText } from './dom';
 import { ICONS } from './icons';
 import { maximizeButton, Movable } from './movable';
-import { closePty, createPty, stopAgent, takeoverAgent } from './ptyapi';
+import { closePty, createPty, stopAgent, takeoverAgent, type NewPtyOptions } from './ptyapi';
 import type { PtyPane } from './ptypane';
 import { TermActions } from './termactions';
 import { TermTabs } from './termtabs';
@@ -32,7 +32,7 @@ export interface PtyControl {
   openAgent(agentId: string): void;
   close(): void;
   takeover(agentId: string): Promise<void>;
-  newSession(cwd: string, account?: string): Promise<void>;
+  newSession(cwd: string, account?: string, opts?: NewPtyOptions): Promise<void>;
   stop(agentId: string): Promise<void>;
 }
 
@@ -144,8 +144,8 @@ export class PtyPanel implements UiComponent, PtyControl {
     if (p) this.show(p, true);
   }
 
-  async newSession(cwd: string, account?: string): Promise<void> {
-    const p = await createPty(cwd, account);
+  async newSession(cwd: string, account?: string, opts?: NewPtyOptions): Promise<void> {
+    const p = await createPty(cwd, account, opts);
     if (p) this.show(p, true);
   }
 
@@ -167,11 +167,11 @@ export class PtyPanel implements UiComponent, PtyControl {
       this.pendingSelect = null;
       this.ctx.select({ type: 'agent', id: agent.id });
     }
-    setText(this.nameEl, agent?.name ?? 'Claude Code');
+    setText(this.nameEl, agent?.name ?? (cur.login ? tr('Conectar conta') : cur.provider === 'codex' ? 'Codex' : 'Claude Code'));
     updateAccountChip(this.accEl, this.ctx.account(cur.account), cur.account);
     setText(this.roomEl, agent?.title ?? cur.cwd);
     const ended = cur.exitedAt !== undefined;
-    setText(this.stateEl, ended ? tr('encerrado') : agent ? '' : cur.resumed ? tr('retomando…') : tr('iniciando…'));
+    setText(this.stateEl, ended ? tr('encerrado') : agent || cur.login ? '' : cur.resumed ? tr('retomando…') : tr('iniciando…'));
     this.actions.withTakeover = false;
     this.actions.render(ended ? null : (agent ?? null));
     this.tabs.render(agent ? agent.id : null);

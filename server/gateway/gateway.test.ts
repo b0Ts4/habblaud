@@ -78,6 +78,7 @@ describe('aprovações', () => {
     const rows = [{ id: 3, tenant_id: 'acme', status: 'aberto' }];
     const db = {
       describeTable: async () => ({ columns: new Map([['id', 'integer'], ['tenant_id', 'text'], ['status', 'text']]), pk: ['id'] }),
+      tenantValue: async (t: string) => t,
       tx: async (_t: string, commit: boolean, fn: (q: (sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number }>) => Promise<unknown>) => {
         commits.push(commit);
         return fn(async (sql) => (sql.startsWith('SELECT') ? { rows, rowCount: 1 } : { rows: [{ ...rows[0], status: 'pago' }], rowCount: 1 }));
@@ -225,5 +226,36 @@ describe('navegador livre (sites externos)', () => {
     const off = parseGatewayConfig({ externo: false, rules: [{ members: ['ana'], tenants: ['*'], externo: 'view' }] });
     expect(externalLevelFor(off, 'bia')).toBe('none');
     expect(externalLevelFor(off, 'ana')).toBe('view');
+  });
+});
+
+// Banco no formato do da empresa (tenant UUID, app.current_tenant, subdomínio numa tabela): HABBLAUD_TEST_PG_UUID=1.
+describe.skipIf(!process.env.HABBLAUD_TEST_PG_UUID)('tenant por subdomínio traduzido para UUID', () => {
+  it('cada subdomínio vê só os dados do seu UUID; ao criar, o gateway põe o UUID', async () => {
+    const dbc = {
+      readUrl: 'postgres://agente_leitura_f:l@127.0.0.1/freelux_teste',
+      writeUrl: 'postgres://agente_escrita_f:e@127.0.0.1/freelux_teste',
+      tenantSetting: 'app.current_tenant',
+      tenantQuery: 'select id from tenants where subdominio = $1',
+      settings: {},
+      maxRows: 50,
+      maxWriteRows: 10,
+      timeoutMs: 5000,
+      allowDelete: false,
+      tenantColumn: 'tenant_id',
+      labels: {},
+    };
+    const db = new GatewayDb(dbc);
+    try {
+      expect((await db.query('solarsul', "select uc from faturas where uc = 'UC-1'")).rows).toEqual([['UC-1']]);
+      expect((await db.query('energianorte', "select uc from faturas where uc = 'UC-1'")).rows).toEqual([]);
+      expect((await db.query('11111111-1111-1111-1111-111111111111', "select uc from faturas where uc = 'UC-1'")).rows).toEqual([['UC-1']]);
+      await expect(db.query('naoexiste', 'select 1')).rejects.toThrow(/não encontrado/);
+      const plan = await planChange(db, dbc, 'solarsul', parseChange({ acao: 'criar', tabela: 'faturas', valores: { uc: 'UC-T', valor: 1 } }, dbc));
+      expect(plan.rows[0].after?.tenant_id).toBe('11111111-1111-1111-1111-111111111111');
+      await expect(planChange(db, dbc, 'solarsul', parseChange({ acao: 'atualizar', tabela: 'faturas', onde: [{ coluna: 'uc', valor: 'UC-9' }], valores: { status: 'x' } }, dbc))).rejects.toThrow(/nenhum registro/);
+    } finally {
+      await db.close();
+    }
   });
 });

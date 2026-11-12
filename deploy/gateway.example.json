@@ -3,10 +3,7 @@
   "db": {
     "readUrl": "postgres://agente_leitura:SENHA@10.0.0.5:5432/sistema",
     "writeUrl": "postgres://agente_escrita:SENHA@10.0.0.5:5432/sistema",
-    "tenantSetting": "app.tenant_id",
-    "settings": {
-      "app.origem": "agente"
-    },
+    "tenantSetting": "app.current_tenant",
     "maxRows": 200,
     "maxWriteRows": 50,
     "timeoutMs": 10000,
@@ -30,7 +27,8 @@
           "email": "E-mail"
         }
       }
-    }
+    },
+    "tenantQuery": "select id from tenants where subdominio = $1"
   },
   "web": {
     "baseUrl": "https://app.freeluxenergia.com.br",

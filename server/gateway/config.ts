@@ -49,6 +49,11 @@ export interface GatewayConfig {
   anyTenant: boolean;
   db?: {
     readUrl: string;
+    /**
+     * Traduz o id do tenant que os agentes usam (ex.: o subdomínio do cliente) para o valor que as políticas de RLS
+     * esperam (ex.: o UUID): um SELECT com $1 que devolve uma linha e uma coluna. Sem ele, o id vai direto.
+     */
+    tenantQuery?: string;
     writeUrl?: string;
     /** Variável de sessão que as políticas de RLS leem (padrão app.tenant_id). */
     tenantSetting: string;
@@ -118,6 +123,7 @@ export function parseGatewayConfig(data: unknown): GatewayConfig {
       maxWriteRows: num(db.maxWriteRows, 50, 1, 10_000),
       timeoutMs: num(db.timeoutMs, 10_000, 500, 120_000),
       allowDelete: db.allowDelete === true,
+      tenantQuery: typeof db.tenantQuery === 'string' && /\$1\b/.test(db.tenantQuery) && /^\s*select\b/i.test(db.tenantQuery) ? db.tenantQuery : undefined,
       tenantColumn: db.tenantColumn === '' ? undefined : typeof db.tenantColumn === 'string' ? db.tenantColumn : 'tenant_id',
       labels: db.labels && typeof db.labels === 'object' ? (db.labels as Record<string, TableLabels>) : {},
     };

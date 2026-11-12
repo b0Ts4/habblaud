@@ -78,6 +78,10 @@ async function main(): Promise<void> {
       const best = [...settings.entries()].sort((a, b) => b[1] - a[1]);
       console.log(`Variável de sessão que as políticas leem: ${best.map(([k, n]) => `${k} (${n} política(s))`).join(', ')}`);
       console.log(`→ no gateway.json use: "tenantSetting": "${best[0][0]}"`);
+      if (policies.some((p) => /::uuid/i.test(String(p.qual ?? '')))) {
+        console.log('→ o tenant é um UUID: para os agentes usarem o subdomínio do cliente, configure "tenantQuery" com o SELECT que');
+        console.log('  devolve o UUID a partir do subdomínio, ex.: "select id from tenants where subdominio = $1".');
+      }
     } else console.log('Nenhuma política lê current_setting(...): o RLS de vocês não usa variável de sessão (o gateway precisa de outro jeito; me mostre as políticas).');
     if (semRls.length) console.log(`✗ Tabelas com "${column}" e RLS DESLIGADO (os agentes veriam todos os tenants): ${semRls.join(', ')}`);
     if (semPolitica.length) console.log(`! RLS ligado sem política: ${semPolitica.join(', ')}`);

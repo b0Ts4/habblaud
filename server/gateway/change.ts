@@ -124,8 +124,10 @@ export async function planChange(db: GatewayDb, cfg: DbConfig, tenant: string, r
   // A coluna do tenant: o gateway põe sozinho ao criar e ninguém a troca (o RLS também barraria).
   const tcol = cfg.tenantColumn;
   if (tcol && columns.has(tcol)) {
-    if (req.valores && tcol in req.valores && req.valores[tcol] !== tenant) refuse(tr('não dá para mudar a coluna do tenant ({0})', [tcol]));
-    if (req.acao === 'criar') req = { ...req, valores: { ...req.valores, [tcol]: tenant } };
+    // O valor de verdade (ex.: o UUID do cliente), não o subdomínio que o agente usou.
+    const tv = await db.tenantValue(tenant);
+    if (req.valores && tcol in req.valores && String(req.valores[tcol]) !== tv) refuse(tr('não dá para mudar a coluna do tenant ({0})', [tcol]));
+    if (req.acao === 'criar') req = { ...req, valores: { ...req.valores, [tcol]: tv } };
     else if (req.acao === 'atualizar' && req.valores) {
       const { [tcol]: _drop, ...rest } = req.valores;
       req = { ...req, valores: rest };

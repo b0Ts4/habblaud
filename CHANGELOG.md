@@ -43,6 +43,8 @@ do meio (0.**3**.0).
 - **Navegador livre para sites externos.** Ferramentas `navegador_*`: qualquer site público num navegador da sede sem
   login, com a tela ao vivo, nunca a rede interna (rede local, a própria VPS, metadados da nuvem). Ligado para todos por
   padrão; `externo` no `gateway.json` limita. Suporte a proxy de saída (`HABBLAUD_GATEWAY_PROXY`).
+- **Tenant UUID a partir do subdomínio.** `tenantQuery` no `gateway.json` traduz o subdomínio que os agentes usam no
+  UUID que as políticas de RLS esperam (com cache); ao criar registros, o gateway põe o UUID na coluna do tenant.
 - **Verificador de RLS.** `npm run gateway:verificar-rls -- "postgres://..."` mostra em português as tabelas com
   `tenant_id`, se o RLS está ligado, as políticas, a variável de sessão que elas leem e quem passa por cima do RLS.
 - **Ferramentas do escritório no feed.** Perguntar, avisar e responder outros agentes e usar o sistema aparecem como

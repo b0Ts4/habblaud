@@ -79,11 +79,36 @@ export class GatewayDb {
     await Promise.all([this.read.end(), this.write?.end()]);
   }
 
+  private tenantCache = new Map<string, { value: string; at: number }>();
+
+  /**
+   * O valor do tenant para o RLS: o id que os agentes usam traduzido por `tenantQuery` (ex.: subdomínio -> UUID), com
+   * cache de 10 min; um UUID vai direto. Tenant que a consulta não acha é recusado.
+   */
+  async tenantValue(tenant: string, c?: PgClient): Promise<string> {
+    const q = this.cfg.tenantQuery;
+    if (!q || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenant)) return tenant;
+    const hit = this.tenantCache.get(tenant);
+    if (hit && Date.now() - hit.at < 600_000) return hit.value;
+    const client = c ?? (await this.read.connect());
+    try {
+      const r = await client.query({ text: q, values: [tenant], name: `gw_${randomBytes(6).toString('hex')}`, rowMode: 'array' });
+      const v = (r.rows[0] as unknown[] | undefined)?.[0];
+      if (v === undefined || v === null) throw new GatewayRefusal(tr('cliente (tenant) não encontrado: {0}', [tenant]));
+      const value = String(v);
+      this.tenantCache.set(tenant, { value, at: Date.now() });
+      return value;
+    } finally {
+      if (!c) client.release();
+    }
+  }
+
   /** Abre a transação com o tenant e as variáveis fixas (SET LOCAL: valem só nesta transação). */
   private async begin(c: PgClient, tenant: string, readOnly: boolean): Promise<void> {
     await c.query(readOnly ? 'BEGIN READ ONLY' : 'BEGIN');
     await c.query(`SET LOCAL statement_timeout = ${Math.round(this.cfg.timeoutMs)}`);
-    for (const [k, v] of [[this.cfg.tenantSetting, tenant], ...Object.entries(this.cfg.settings)]) await c.query(`SET LOCAL ${k} = ${this.esc(v)}`);
+    const value = await this.tenantValue(tenant, c);
+    for (const [k, v] of [[this.cfg.tenantSetting, value], ...Object.entries(this.cfg.settings)]) await c.query(`SET LOCAL ${k} = ${this.esc(v)}`);
   }
 
   /** Um comando só: um nome de comando preparado único força o protocolo estendido. */

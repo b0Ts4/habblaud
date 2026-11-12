@@ -39,7 +39,9 @@ para dar a letra de cada conta). Nada sai do computador: o Habblaud não lê cre
 
 > **Escritório do time inteiro (sede).** Este fork junta o Habblaud de cada pessoa num prédio só, com login por
 > pessoa, terminal ao vivo dos agentes de qualquer computador e regras de quem pode fazer o quê. Cada um continua
-> rodando os agentes na própria conta. Veja [docs/sede.md](docs/sede.md).
+> rodando os agentes na própria conta, comanda tudo pela web ou pelo celular, e os agentes conversam entre si e
+> acessam o sistema da empresa (banco e web) pelo gateway, com regras por tenant e aprovação humana. Veja
+> [docs/sede.md](docs/sede.md) e [docs/gateway.md](docs/gateway.md).
 
 ## Sumário
 

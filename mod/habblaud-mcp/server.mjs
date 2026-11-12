@@ -69,6 +69,69 @@ const TOOLS = [
     description: 'Lista as perguntas que outros agentes fizeram a você e ainda esperam resposta (com o id de cada uma). / Questions waiting for your answer.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
+  // ---- Sistema da empresa (gateway da sede): banco e web, com regras por pessoa e tenant ------------------------
+  {
+    name: 'sistema_tenants',
+    description: 'Lista os tenants do sistema da empresa que você pode acessar e o que pode fazer em cada um (banco: leitura ou alteração com aprovação; web: ver ou interagir). / Tenants you can access.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'sistema_consultar',
+    description:
+      'Consulta o banco do sistema (Postgres) num tenant, só leitura: um SELECT por vez. O tenant é aplicado pelo gateway (RLS); você vê só os dados dele. / Read-only SQL query in one tenant.',
+    inputSchema: {
+      type: 'object',
+      properties: { tenant: { type: 'string' }, sql: { type: 'string', description: 'Um SELECT (ou WITH ... SELECT).' } },
+      required: ['tenant', 'sql'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'sistema_alterar',
+    description:
+      'Pede para alterar o banco num tenant (INSERT ou UPDATE, um comando). Nada é gravado sem aprovação humana: o gateway ensaia, mostra quantas linhas mudariam e espera alguém aprovar na sede. Explique o motivo. / Ask for a DB change; needs human approval.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tenant: { type: 'string' },
+        sql: { type: 'string' },
+        motivo: { type: 'string', description: 'Por que a alteração é necessária (a pessoa lê isto para aprovar).' },
+        esperar_segundos: { type: 'number', description: 'Quanto esperar a aprovação agora (0 a 600; padrão 0).' },
+      },
+      required: ['tenant', 'sql', 'motivo'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'sistema_ver_alteracao',
+    description: 'Confere (e espera) a decisão de um pedido de alteração feito com sistema_alterar. / Check a change request.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, esperar_segundos: { type: 'number' } }, required: ['id'], additionalProperties: false },
+  },
+  {
+    name: 'sistema_web_abrir',
+    description: 'Abre uma página do sistema da empresa num navegador já logado no tenant (a pessoa acompanha a tela ao vivo na sede). Devolve a estrutura da página. / Open a page of the company system.',
+    inputSchema: { type: 'object', properties: { tenant: { type: 'string' }, caminho: { type: 'string', description: 'Caminho no sistema (ex.: /pedidos). Vazio = página inicial.' } }, required: ['tenant'], additionalProperties: false },
+  },
+  {
+    name: 'sistema_web_ler',
+    description: 'Lê a página atual do navegador do sistema: título, endereço, botões, campos e texto. / Read the current page.',
+    inputSchema: { type: 'object', properties: { tenant: { type: 'string' } }, required: ['tenant'], additionalProperties: false },
+  },
+  {
+    name: 'sistema_web_clicar',
+    description: 'Clica num botão, link ou texto da página do sistema (pelo nome visível ou um seletor CSS). / Click an element.',
+    inputSchema: { type: 'object', properties: { tenant: { type: 'string' }, alvo: { type: 'string' } }, required: ['tenant', 'alvo'], additionalProperties: false },
+  },
+  {
+    name: 'sistema_web_preencher',
+    description: 'Preenche um campo da página do sistema (pelo rótulo, placeholder ou seletor CSS). / Fill a field.',
+    inputSchema: { type: 'object', properties: { tenant: { type: 'string' }, campo: { type: 'string' }, valor: { type: 'string' } }, required: ['tenant', 'campo', 'valor'], additionalProperties: false },
+  },
+  {
+    name: 'sistema_web_print',
+    description: 'Tira um print da página atual do sistema. / Screenshot of the current page.',
+    inputSchema: { type: 'object', properties: { tenant: { type: 'string' } }, required: ['tenant'], additionalProperties: false },
+  },
 ];
 
 async function api(method, path, body, timeoutMs = 30_000) {
@@ -130,8 +193,15 @@ async function call(name, args) {
       if (!asks?.length) return 'Nenhuma pergunta esperando a sua resposta.';
       return asks.map((a) => `- id ${a.id}, de ${a.from}: ${a.text}`).join('\n');
     }
-    default:
-      throw new Error(`ferramenta desconhecida: ${name}`);
+    default: {
+      if (!name?.startsWith('sistema_')) throw new Error(`ferramenta desconhecida: ${name}`);
+      const action = name === 'sistema_ver_alteracao' ? 'alteracao' : name.slice('sistema_'.length);
+      const wait = Number(args.esperar_segundos) || 0;
+      const r = await api('POST', '/api/office/gateway', { who: WHO, action, args }, (Math.min(600, wait) + 120) * 1000);
+      if (r.error) throw new Error(r.error);
+      if (r.image) return { content: [{ type: 'image', data: r.image, mimeType: 'image/jpeg' }, { type: 'text', text: r.text ?? '' }] };
+      return r.text ?? '';
+    }
   }
 }
 
@@ -152,7 +222,7 @@ async function handle(msg) {
           capabilities: { tools: {} },
           serverInfo: { name: 'habblaud-escritorio', version: VERSION },
           instructions:
-            'Você está no escritório do time (Habblaud). Com estas ferramentas você conversa com os agentes das outras pessoas e dos outros projetos. Quando uma mensagem chegar marcada [Escritório] com um id, responda com escritorio_responder.',
+            'Você está no escritório do time (Habblaud). Com as ferramentas escritorio_* você conversa com os agentes das outras pessoas e dos outros projetos; quando uma mensagem chegar marcada [Escritório] com um id, responda com escritorio_responder. Com as ferramentas sistema_* você acessa o sistema da empresa (banco e web) pelo gateway da sede, só nos tenants liberados (veja sistema_tenants); alterações no banco esperam aprovação humana.',
         },
       });
     }
@@ -160,8 +230,8 @@ async function handle(msg) {
     if (method === 'tools/list') return send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
     if (method === 'tools/call') {
       try {
-        const text = await call(params?.name, params?.arguments ?? {});
-        return send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }] } });
+        const out = await call(params?.name, params?.arguments ?? {});
+        return send({ jsonrpc: '2.0', id, result: typeof out === 'string' ? { content: [{ type: 'text', text: out }] } : out });
       } catch (err) {
         return send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: String(err?.message ?? err) }], isError: true } });
       }

@@ -119,6 +119,15 @@ describe('MCP do escritório', () => {
       'escritorio_ver_resposta',
       'escritorio_responder',
       'escritorio_pendentes',
+      'sistema_tenants',
+      'sistema_consultar',
+      'sistema_alterar',
+      'sistema_ver_alteracao',
+      'sistema_web_abrir',
+      'sistema_web_ler',
+      'sistema_web_clicar',
+      'sistema_web_preencher',
+      'sistema_web_print',
     ]);
     expect(byId.get(3)).toMatchObject({ isError: true });
   });

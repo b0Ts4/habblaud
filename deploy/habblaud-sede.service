@@ -1,0 +1,17 @@
+# Sede do Habblaud como serviço do systemd (VPS Linux). Ajuste User e WorkingDirectory e copie para
+# /etc/systemd/system/habblaud-sede.service; depois: sudo systemctl daemon-reload && sudo systemctl enable --now habblaud-sede
+# Configuração em /opt/habblaud/.env.sede (ver deploy/env.sede.example). Recarregar membros/política: systemctl reload habblaud-sede
+[Unit]
+Description=Habblaud - sede do escritorio
+After=network-online.target postgresql.service
+
+[Service]
+User=habblaud
+WorkingDirectory=/opt/habblaud
+ExecStart=/usr/bin/node --env-file-if-exists=.env.sede dist/server/central.js
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

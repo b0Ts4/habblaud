@@ -1,0 +1,24 @@
+{
+  "tenants": { "acme": "ACME Ltda", "beta": "Beta SA" },
+  "db": {
+    "readUrl": "postgres://agente_leitura:SENHA@10.0.0.5:5432/sistema",
+    "writeUrl": "postgres://agente_escrita:SENHA@10.0.0.5:5432/sistema",
+    "tenantSetting": "app.tenant_id",
+    "settings": { "app.origem": "agente" },
+    "maxRows": 200,
+    "maxWriteRows": 50,
+    "timeoutMs": 10000,
+    "allowDelete": false
+  },
+  "web": {
+    "baseUrl": "https://app.suaempresa.com",
+    "tenantUrl": "{base}/{tenant}",
+    "login": { "path": "/login", "fields": { "#email": "{user}", "#senha": "{password}" }, "submit": "button[type=submit]" },
+    "credentials": { "*": { "user": "agente@suaempresa.com", "passwordEnv": "SISTEMA_SENHA" } }
+  },
+  "rules": [
+    { "members": ["*"], "tenants": ["*"], "db": "read", "web": "view" },
+    { "members": ["bruno"], "tenants": ["*"], "db": "write", "web": "interact" }
+  ],
+  "approvers": "owner"
+}

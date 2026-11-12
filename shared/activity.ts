@@ -638,6 +638,32 @@ function describeMcp(name: string, input: Record<string, unknown>): ActivityDesc
   const [, server = '', ...rest] = name.split('__');
   const tool = rest.join('__');
   const srv = server.replace(/^claude_ai_/, '');
+  // MCP do escritório (mod/habblaud-mcp): conversa entre agentes e o sistema da empresa (gateway da sede).
+  if (srv === 'escritorio') {
+    const who = str(input.agente);
+    const msg = str(input.mensagem);
+    switch (tool) {
+      case 'escritorio_agentes':
+        return make('communicate', '👥', tr('Vendo quem está no escritório'));
+      case 'escritorio_perguntar':
+        return make('communicate', '💬', who ? tr('Perguntando a {0}', [who]) : tr('Perguntando a outro agente'), msg);
+      case 'escritorio_enviar':
+        return make('communicate', '📨', who ? tr('Avisando {0}', [who]) : tr('Avisando outro agente'), msg);
+      case 'escritorio_responder':
+        return make('communicate', '↩️', tr('Respondendo outro agente'), str(input.resposta));
+      case 'escritorio_ver_resposta':
+        return make('wait', '⏳', tr('Esperando a resposta de outro agente'));
+      case 'escritorio_pendentes':
+        return make('communicate', '📥', tr('Vendo as perguntas recebidas'));
+      case 'sistema_consultar':
+        return make('mcp', '🗄️', tr('Consultando o sistema ({0})', [str(input.tenant) || '?']), str(input.sql));
+      case 'sistema_alterar':
+        return make('mcp', '✍️', tr('Pedindo para alterar o sistema ({0})', [str(input.tenant) || '?']), str(input.sql));
+      case 'sistema_tenants':
+        return make('mcp', '🏢', tr('Vendo os tenants liberados'));
+    }
+    if (tool.startsWith('sistema_web_')) return make('browser', '🧭', tr('Sistema pela web: {0}', [humanize(tool.slice('sistema_web_'.length))]), str(input.caminho) || str(input.alvo));
+  }
   if (/playwright|chrome|browser|puppeteer/i.test(srv)) {
     const url = str(input.url);
     if (/navigate/.test(tool)) return make('browser', '🧭', url ? tr('Abrindo {0}', [domainOf(url)]) : tr('Navegando no navegador'), url);

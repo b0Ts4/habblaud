@@ -50,6 +50,12 @@ export class CentralTalk implements TalkBackend {
     return 'error' in r ? r : { ok: true };
   }
 
+  /** Ação do gateway do sistema na sede (espera longa só ao esperar uma aprovação). */
+  gateway(from: AgentInfo, action: string, args: Record<string, unknown>): Promise<unknown> {
+    const wait = Math.max(0, Math.min(600, Number(args.esperar_segundos) || 0));
+    return this.call('POST', '/central/uplink/gateway', { from: from.id, action, args }, (wait + 90) * 1000);
+  }
+
   async inbox(from: AgentInfo): Promise<AskView[]> {
     const r = await this.call<{ asks: AskView[] }>('GET', `/central/uplink/inbox?${new URLSearchParams({ from: from.id })}`);
     return 'error' in r ? [] : r.asks;

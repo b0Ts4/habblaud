@@ -2355,7 +2355,7 @@ export const EN: Readonly<Record<string, string>> = {
   "{0} · responda no Claude Code: este pedido não chegou ao Habblaud ou passou do tempo de espera": "{0} · answer in Claude Code: this request didn't reach Habblaud or timed out",
 
   // client/src/ui/topbar.ts
-  "Novo agente: começa uma sessão do Claude Code no computador": "New agent: starts a Claude Code session on the computer",
+  "Novo agente: começa uma sessão do Claude Code ou do Codex no computador": "New agent: starts a Claude Code or Codex session on the computer",
 
   // server/deliveries/deliveries.ts
   "Tela capturada pelo agente": "Screenshot taken by the agent",

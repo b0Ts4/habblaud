@@ -81,6 +81,11 @@ export class CentralHub {
     res.on('close', drop);
   }
 
+  /** Aviso só para as páginas de um membro (ex.: alteração no sistema esperando a aprovação dele). */
+  notice(member: string, n: Notice): void {
+    for (const c of this.clients) if (c.who.member === member || c.who.admin) this.write(c, frame('notice', n));
+  }
+
   private merge(): OfficeSnapshot {
     return mergeSnapshots(this.members.states(), {
       rev: ++this.rev,

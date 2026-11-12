@@ -105,6 +105,8 @@ export interface TalkRoutesDeps {
   whoIs: (who: Who) => AgentInfo | undefined;
   backend: () => TalkBackend;
   deliver: Deliver;
+  /** Gateway do sistema (só pela sede): ferramentas sistema_* do MCP. */
+  gateway?: (from: AgentInfo, action: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
 function parseWho(raw: unknown): Who {
@@ -155,6 +157,12 @@ export function createTalkRoutes(deps: TalkRoutesDeps): (req: IncomingMessage, r
       if (typeof b.id !== 'string') throw new HttpError(400, tr('falta o id do pedido'));
       const r = await deps.backend().reply(me(b.who), b.id, text(b.text));
       return sendJson(res, 'error' in r ? 409 : 200, r);
+    }
+    if (path === '/api/office/gateway') {
+      const b = (await readJson(req, 256 * 1024)) as { who?: unknown; action?: unknown; args?: unknown };
+      const from = me(b.who);
+      if (!deps.gateway) return sendJson(res, 200, { error: tr('o acesso ao sistema da empresa passa pela sede: este computador não está ligado a uma sede (HABBLAUD_CENTRAL_URL)') });
+      return sendJson(res, 200, await deps.gateway(from, String(b.action ?? ''), (b.args ?? {}) as Record<string, unknown>));
     }
     if (path === '/api/office/deliver') {
       const b = (await readJson(req)) as { agentId?: unknown; text?: unknown };

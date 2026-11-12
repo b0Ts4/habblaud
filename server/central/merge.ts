@@ -59,6 +59,8 @@ export function canControl(m: MemberState | undefined): boolean {
 export interface ViewerRights {
   /** Membro da pessoa que olha (os agentes "dela"). */
   member: string;
+  /** Administrador da sede. */
+  admin?: boolean;
   /** Pode mandar mensagem a agentes de outros membros. */
   messageOthers: boolean;
   /** Pode responder pedidos de permissão de agentes de outros membros. */

@@ -396,6 +396,8 @@ export interface AccessInfo {
    * com Host local. Ausente em servidores antigos.
    */
   world?: boolean;
+  /** Página servida pela sede (server/central.ts): mostra os atalhos de Aprovações e Tela dos agentes. */
+  central?: { gateway: boolean };
 }
 
 export interface FeedItem {

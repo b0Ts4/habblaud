@@ -19,6 +19,8 @@ import { canControl, mapDetail, mapOutbox, mapPermission, mapPty, mapTerminalIni
 import type { MemberUpdate, Members, TunnelRequest } from './members';
 import { AskRegistry } from '../talk/registry';
 import { handleTalk } from './talk';
+import type { GatewayService } from '../gateway/service';
+import { handleGatewayPages, handleGatewayUplink } from './gateway-routes';
 
 /** Maior estado aceito de um membro (snapshot descomprimido). */
 const MAX_STATE = 16 * 1024 * 1024;
@@ -35,6 +37,8 @@ export interface CentralAppDeps {
   secure: boolean;
   version: string;
   throttle?: LoginThrottle;
+  /** Gateway do sistema (banco e web), se configurado (gateway.json). */
+  gateway?: GatewayService;
 }
 
 export function sendJson(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -130,10 +134,11 @@ export function createCentralApp(deps: CentralAppDeps): (req: IncomingMessage, r
   const { members, hub, sessions } = deps;
   // Conversa entre agentes de computadores diferentes (central/talk.ts).
   const talk = { config: deps.config, members, registry: new AskRegistry(), sendJson, readJson: <T>(req: IncomingMessage) => readJson<T>(req) };
+  const gw = { gateway: deps.gateway, config: deps.config, members, sendJson, readJson: <T>(req: IncomingMessage) => readJson<T>(req) };
 
   const rights = (m: Member): ViewerRights => {
     const cfg = deps.config();
-    return { member: m.id, messageOthers: m.admin === true || cfg.policy.messages === 'all', answerOthers: m.admin === true || cfg.policy.permissions === 'all' };
+    return { member: m.id, admin: m.admin === true, messageOthers: m.admin === true || cfg.policy.messages === 'all', answerOthers: m.admin === true || cfg.policy.permissions === 'all' };
   };
 
   /** Repassa um pedido ao membro e devolve a resposta à página, trocando os ids locais pelos da sede quando é JSON. */
@@ -205,6 +210,7 @@ export function createCentralApp(deps: CentralAppDeps): (req: IncomingMessage, r
         return true;
       }
       if (handleTalk(talk, m, req, res, url)) return true;
+      if (handleGatewayUplink(gw, m, req, res, url)) return true;
       req.resume();
       sendJson(res, 404, { error: tr('rota desconhecida') });
       return true;
@@ -277,12 +283,13 @@ export function createCentralApp(deps: CentralAppDeps): (req: IncomingMessage, r
     }
 
     // ---- Página logada --------------------------------------------------------------------------------------
+    if (handleGatewayPages(gw, who, req, res, url)) return true;
     if (!path.startsWith('/api/')) return false;
     const may = (owner: string, what: keyof CentralPolicy) => allowed(cfg, who, owner, what);
 
     if (path === '/api/access') {
       // "Novo agente" abre no computador da própria pessoa (pelo terminal interativo dele).
-      const access: AccessInfo = { remote: true, local: false, permissions: true, messages: true, terminal: true, spawn: canControl(members.state(who.id)), world: false };
+      const access: AccessInfo = { remote: true, local: false, permissions: true, messages: true, terminal: true, spawn: canControl(members.state(who.id)), world: false, central: { gateway: !!deps.gateway } };
       sendJson(res, 200, access);
       return true;
     }

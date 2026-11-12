@@ -401,6 +401,8 @@ const talk = createTalkRoutes({
   },
   backend: () => centralTalk ?? localTalk,
   deliver: deliverToAgent,
+  // Gateway do sistema: só existe na sede (com o computador ligado a ela).
+  gateway: centralCfg.config ? (from, action, args) => new CentralTalk(centralCfg.config!.url, centralCfg.config!.token).gateway(from, action, args) : undefined,
 });
 const ticker = setInterval(() => {
   try {

@@ -1,0 +1,7 @@
+# /etc/caddy/Caddyfile — HTTPS automático (Let's Encrypt) na frente da sede.
+habblaud.suaempresa.com {
+	reverse_proxy 127.0.0.1:4800 {
+		# Terminal ao vivo, telas e túnel: sem buffer.
+		flush_interval -1
+	}
+}

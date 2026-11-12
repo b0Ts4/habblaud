@@ -71,7 +71,20 @@ sudo systemctl reload caddy
 HABBLAUD_CENTRAL_HOST=127.0.0.1 HABBLAUD_ALLOWED_HOSTS=habblaud.suaempresa.com npm run start:central
 ```
 
-Para a sede subir sozinha com a VPS, use um serviço do systemd (ou `pm2`) rodando o mesmo comando.
+Para a sede subir sozinha com a VPS, use os arquivos prontos de [`deploy/`](../deploy): o serviço do systemd
+([`habblaud-sede.service`](../deploy/habblaud-sede.service)), a configuração ([`env.sede.example`](../deploy/env.sede.example),
+lida pelo `npm run sede`) e o [`Caddyfile`](../deploy/Caddyfile.example). Resumo numa VPS Ubuntu (Hostinger, por exemplo):
+
+```bash
+sudo useradd -r -m -d /opt/habblaud habblaud && sudo -u habblaud git clone https://github.com/b0Ts4/habblaud.git /opt/habblaud
+cd /opt/habblaud && sudo -u habblaud npm install && sudo -u habblaud npm run build
+sudo -u habblaud cp deploy/env.sede.example .env.sede && sudo -u habblaud nano .env.sede
+sudo -u habblaud HABBLAUD_CENTRAL_CONFIG=/opt/habblaud/dados/central.json npm run central:member -- add bruno "Bruno" --admin
+sudo cp deploy/habblaud-sede.service /etc/systemd/system/ && sudo systemctl enable --now habblaud-sede
+sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile && sudo nano /etc/caddy/Caddyfile && sudo systemctl reload caddy
+```
+
+O acesso dos agentes ao sistema da empresa (banco e web) é o **gateway**, também na sede: [docs/gateway.md](gateway.md).
 
 > O proxy precisa repassar **corpo de requisição em fluxo, sem buffer** (o terminal ao vivo volta assim). No nginx:
 > `proxy_request_buffering off; proxy_buffering off; proxy_read_timeout 1d;` nos `location /`. O Caddy já faz isso.
@@ -89,7 +102,21 @@ Mudou a configuração (membro novo, senha, política)? `kill -HUP <pid da sede>
 
 ## Ligar o Habblaud de cada pessoa
 
-No computador de cada um (Windows, Linux ou macOS), no `.env` do Habblaud ou no ambiente:
+No computador de cada um (Windows, Linux ou macOS), com o Node 22.12+ e o Claude Code e/ou o Codex instalados
+(`npm install -g @anthropic-ai/claude-code @openai/codex`):
+
+```bash
+git clone https://github.com/b0Ts4/habblaud.git
+cd habblaud
+npm install
+npm run build
+npm run membro:configurar -- --sede https://habblaud.suaempresa.com --token hbs_... --iniciar-com-o-computador
+npm run membro
+```
+
+O `membro:configurar` grava o `.env` abaixo, confere a sede, o terminal interativo, o Claude Code e o Codex, e com
+`--iniciar-com-o-computador` deixa o Habblaud subindo sozinho no login (Windows: Agendador de Tarefas; Linux: systemd do
+usuário; macOS: LaunchAgent). O `npm run membro` sobe o Habblaud lendo esse `.env`. Feito à mão, o `.env` é:
 
 ```bash
 HABBLAUD_CENTRAL_URL=https://habblaud.suaempresa.com

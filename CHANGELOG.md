@@ -30,6 +30,16 @@ do meio (0.**3**.0).
   responder. A mensagem entra na sessão do outro agente marcada `[Escritório]`, com o id para responder. Roteado pela
   sede (política `agents`, liberação `agents` em cada computador) ou, sem sede, entre os agentes do mesmo computador.
 
+- **Gateway do sistema na sede: agentes no banco e na web, com regras.** Ferramentas `sistema_*` no MCP do escritório:
+  consultas no Postgres com o tenant aplicado (`SET LOCAL` + RLS, transação só de leitura, um comando por vez),
+  alterações com ensaio e **aprovação humana** (página Aprovações, também no celular), e o sistema pela interface web
+  num navegador da sede já logado no tenant, com a **tela ao vivo** de cada agente (página Tela dos agentes). Regras por
+  pessoa e tenant e auditoria de tudo. Guia: [docs/gateway.md](docs/gateway.md).
+- **Ferramentas do escritório no feed.** Perguntar, avisar e responder outros agentes e usar o sistema aparecem como
+  atividades com frases próprias.
+- **Instalação em um comando.** `npm run membro:configurar` liga o computador à sede (e, se pedido, sobe junto com o
+  computador); `npm run membro` e `npm run sede` sobem lendo o `.env`; arquivos prontos para a VPS em `deploy/`.
+
 ### Corrigido
 
 - **Celular: o terminal interativo ficava atrás da barra superior.** Agora ocupa a tela inteira, como o terminal ao vivo.

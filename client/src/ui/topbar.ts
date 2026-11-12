@@ -50,6 +50,9 @@ export class TopBar implements UiComponent {
   /** Abre a janela do Habblaud World (ao lado de Configurações); a janela decide quando ele aparece. */
   readonly worldBtn: HTMLButtonElement;
   private readonly spawnBtn: HTMLButtonElement;
+  /** Sede: alterações no sistema esperando aprovação e a tela dos navegadores dos agentes (server/central/gateway-routes.ts). */
+  private readonly approvalsBtn: HTMLButtonElement;
+  private readonly screensBtn: HTMLButtonElement;
   private readonly spawnPanel: SpawnPanel;
   /** Grupo dos botões de painéis (feed, Habblaud World, configurações, ajuda); o histórico entra aqui (ui/index.ts). */
   readonly panelGroup: HTMLElement;
@@ -115,6 +118,10 @@ export class TopBar implements UiComponent {
     ctx.root.append(this.spawnPanel.el);
     this.spawnBtn = iconButton(ICONS.newAgent, tr('Novo agente: começa uma sessão do Claude Code ou do Codex no computador'), () => this.spawnPanel.toggle(this.spawnBtn), 'ui-btn-spawn');
     this.spawnBtn.setAttribute('aria-haspopup', 'dialog');
+    this.approvalsBtn = iconButton(ICONS.check, tr('Aprovações: alterações no sistema pedidas pelos agentes'), () => location.assign('/aprovacoes'));
+    this.screensBtn = iconButton(ICONS.office, tr('Tela dos agentes: o navegador de cada agente mexendo no sistema, ao vivo'), () => location.assign('/tela'));
+    this.approvalsBtn.hidden = true;
+    this.screensBtn.hidden = true;
     this.spawnBtn.hidden = true;
     this.version = new VersionChip(ctx, this.settingsBtn);
     this.status = h('div', { class: 'ui-topbar__status' }, this.pill, this.version.el, this.demoBadge);
@@ -129,6 +136,8 @@ export class TopBar implements UiComponent {
       'div',
       { class: 'ui-btn-group', role: 'group', attrs: { 'aria-label': tr('Painéis') } },
       this.spawnBtn,
+      this.approvalsBtn,
+      this.screensBtn,
       this.timelapseBtn,
       this.feedBtn,
       this.worldBtn,
@@ -220,6 +229,9 @@ export class TopBar implements UiComponent {
     this.usage.render();
     this.version.render();
     setHidden(this.spawnBtn, !access().spawn || store.mock || store.replaying);
+    const gateway = !!access().central?.gateway && !store.mock && !store.replaying;
+    setHidden(this.approvalsBtn, !gateway);
+    setHidden(this.screensBtn, !gateway);
 
     this.sidebarBtn.setAttribute('aria-pressed', String(this.ctx.isPanelOpen('sidebar')));
     this.feedBtn.setAttribute('aria-pressed', String(this.ctx.isPanelOpen('feed')));

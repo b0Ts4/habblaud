@@ -16,6 +16,8 @@ import { createCentralApp, sendJson } from './central/app';
 import { parseCentralFile, readCentralFile, type CentralConfig } from './central/config';
 import { CentralHub } from './central/hub';
 import { Members } from './central/members';
+import { readGatewayConfig } from './gateway/config';
+import { GatewayService } from './gateway/service';
 import { createRequestGuard } from './http/guard';
 import { createStaticHandler } from './http/static';
 import { errMsg, log } from './log';
@@ -59,7 +61,29 @@ const members = new Members();
 const build = createBuildReader(base.rootDir);
 const hub = new CentralHub(members, { version: base.version, startedAt: Date.now(), build });
 const sessions = new CentralSessions(loadSecret(join(dirname(file), 'central-secret')), (id) => config.members.get(id));
-const app = createCentralApp({ config: () => config, members, hub, sessions, secure, version: base.version });
+// Gateway do sistema (banco e web), opcional: gateway.json ao lado da configuração da sede.
+const gatewayFile = env.HABBLAUD_GATEWAY_CONFIG?.trim() || join(dirname(file), 'gateway.json');
+let gateway: GatewayService | undefined;
+try {
+  const gcfg = readGatewayConfig(gatewayFile);
+  if (gcfg) {
+    gateway = new GatewayService({
+      config: gcfg,
+      auditFile: join(dirname(file), 'gateway-audit.jsonl'),
+      notify: (a) =>
+        hub.notice(a.caller.member, {
+          id: a.id,
+          level: 'warn',
+          text: tr('✍️ {0} pede para alterar o sistema (tenant {1}): aprove ou recuse em Aprovações.', [a.caller.agentName, a.tenant]),
+          at: a.createdAt,
+        }),
+    });
+  }
+} catch (err) {
+  log.error(tr('Sede: gateway.json inválido ({0}): {1}', [gatewayFile, errMsg(err)]));
+  process.exit(1);
+}
+const app = createCentralApp({ config: () => config, members, hub, sessions, secure, version: base.version, gateway });
 const guard = createRequestGuard({ allowedHosts: base.allowedHosts });
 const serveStatic = createStaticHandler(join(base.rootDir, 'dist', 'client'));
 
@@ -100,10 +124,16 @@ server.listen(port, host, () => {
   log.info(tr('🏢 Sede do Habblaud {0} ({1}) em http://{2}:{3}', [base.version, config.name, host === '0.0.0.0' ? 'localhost' : host, port]));
   log.info(tr('   Membros: {0} · política: terminal {1}, mensagens {2}, permissões {3}', [[...config.members.keys()].join(', ') || '-', config.policy.terminal, config.policy.messages, config.policy.permissions]));
   if (!secure) log.warn(tr('   Cookie de login sem Secure (HABBLAUD_CENTRAL_INSECURE_HTTP): use só para testar.'));
+  log.info(
+    gateway
+      ? tr('   Gateway do sistema: {0} tenant(s); banco {1}; web {2}.', [Object.keys(gateway.config.tenants).length, gateway.db ? tr('ligado') : tr('não'), gateway.web ? gateway.config.web!.baseUrl : tr('não')])
+      : tr('   Gateway do sistema: desligado (sem {0}).', [gatewayFile]),
+  );
   if (!base.allowedHosts.size) log.info(tr('   Atrás de um domínio? Libere o nome em HABBLAUD_ALLOWED_HOSTS.'));
 });
 
 function shutdown(): void {
+  void gateway?.close();
   hub.stop();
   members.stop();
   server.close(() => process.exit(0));

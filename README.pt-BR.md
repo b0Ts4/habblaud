@@ -37,6 +37,10 @@ moedinhas no jokenpô. Veja em [Vida social](#vida-social).
 Tudo roda na sua máquina, lendo os arquivos que o próprio Claude Code já grava (e só as linhas `alias` do seu shell,
 para dar a letra de cada conta). Nada sai do computador: o Habblaud não lê credenciais nem faz chamadas externas.
 
+> **Escritório do time inteiro (sede).** Este fork junta o Habblaud de cada pessoa num prédio só, com login por
+> pessoa, terminal ao vivo dos agentes de qualquer computador e regras de quem pode fazer o quê. Cada um continua
+> rodando os agentes na própria conta. Veja [docs/sede.md](docs/sede.md).
+
 ## Sumário
 
 - [Como é](#como-é)
@@ -125,7 +129,7 @@ ela, e o endereço antigo apaga e é desmontado. Assim o prédio não fica com b
 
 ### Requisitos
 
-- **macOS** (testado) ou Linux.
+- **macOS**, **Linux** ou **Windows**.
 - **[Claude Code](https://code.claude.com)** instalado, com uma ou mais contas (2.1.287 ou mais novo para o mod).
 - **Node.js 22.12+** e **npm** (desenvolvido com o Node 24; o Docker já usa o Node 24).
 - **Docker Desktop** (ou Docker Engine com Compose v2), se for rodar em container.

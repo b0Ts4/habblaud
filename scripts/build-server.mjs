@@ -3,9 +3,10 @@
 import { build } from 'esbuild';
 import { writeBuildInfo } from './build-info.mjs';
 
+// O Habblaud de cada computador (index.ts) e a sede do time (central.ts).
 await build({
-  entryPoints: ['server/index.ts'],
-  outfile: 'dist/server/index.js',
+  entryPoints: { index: 'server/index.ts', central: 'server/central.ts' },
+  outdir: 'dist/server',
   bundle: true,
   platform: 'node',
   target: 'node20',

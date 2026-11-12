@@ -10,6 +10,15 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+### Novo
+
+- **Sede: o escritório do time inteiro.** Um servidor novo (`npm run start:central`) junta o Habblaud de cada pessoa
+  num prédio só, com login por pessoa. Cada um continua rodando os agentes na própria conta e no próprio computador;
+  com `HABBLAUD_CENTRAL_URL` e `HABBLAUD_CENTRAL_TOKEN`, o Habblaud local manda o escritório para a sede e atende,
+  pela mesma conexão (saindo do computador, nada exposto), os pedidos de terminal ao vivo, mensagens e permissões que
+  a pessoa liberar em `HABBLAUD_CENTRAL_ALLOW`. Quem faz o quê com os agentes dos outros segue a política da sede
+  (`npm run central:member -- policy ...`). Guia: [docs/sede.md](docs/sede.md).
+
 ## [1.0.3] - 2026-10-16
 
 ### Corrigido

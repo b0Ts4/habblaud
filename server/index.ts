@@ -57,6 +57,7 @@ import { WorldSettingsStore } from './world/settings';
 import { OwnerSocial } from './world/social';
 import { BuildingTokens } from './world/tokens';
 import { BuildingUplink } from './world/uplink';
+import { CentralUplink, parseCentralUplink } from './central/uplink';
 import { WorldViewer } from './world/viewer';
 
 const config = loadConfig();
@@ -330,6 +331,20 @@ messages?.start();
 stats.start();
 updates.start();
 worldUplink?.start();
+// Sede do time (server/central.ts): com HABBLAUD_CENTRAL_URL e HABBLAUD_CENTRAL_TOKEN, o escritório deste computador
+// aparece na sede, que pode pedir a esta API (pelo túnel de central/uplink.ts) só o que HABBLAUD_CENTRAL_ALLOW libera.
+const centralCfg = parseCentralUplink(process.env);
+const central = centralCfg.config
+  ? new CentralUplink({
+      config: centralCfg.config,
+      localBase: `http://127.0.0.1:${config.port}`,
+      current: () => hub.current(),
+      onSnapshot: (cb) => hub.onSnapshot(cb),
+      onFeed: (cb) => hub.onFeed(cb),
+      log,
+    })
+  : undefined;
+central?.start();
 const ticker = setInterval(() => {
   try {
     office.tick();
@@ -520,6 +535,8 @@ server.listen(config.port, config.host, () => {
           : tr('   Mensagens ao Codex: sem o binário do Codex (codex no PATH ou HABBLAUD_CODEX_BIN); o auxiliar npm run codex:bridge também serve.'),
     );
   }
+  if (centralCfg.warning) log.warn(`   ${centralCfg.warning}.`);
+  else if (centralCfg.config) log.info(tr('   Sede: {0} (libera: {1}).', [centralCfg.config.url, [...centralCfg.config.allow].join(', ') || tr('só ver')]));
   if (config.world.warning) log.warn(`   ${config.world.warning}.`);
   log.info(
     !world
@@ -557,6 +574,7 @@ function shutdown(signal: string): void {
   updates.stop();
   worldViewer?.stop();
   worldUplink?.stop();
+  central?.stop();
   world?.stop();
   names.flush();
   void closeVite?.();

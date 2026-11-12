@@ -2,7 +2,7 @@
 // Eventos nomeados: snapshot | feed | notice (o `data` é o JSON do protocolo em shared/types.ts).
 // Snapshots saem com throttle (~200 ms); feed e avisos vão em lote logo depois do snapshot.
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { OfficeSnapshot } from '../../shared/types';
+import type { FeedItem, Notice, OfficeSnapshot } from '../../shared/types';
 import type { Office } from '../model/office';
 import { isLoopbackHost } from './guard';
 
@@ -18,6 +18,7 @@ export class Hub {
   private lastFlush = 0;
   private unsubscribe: (() => void) | null = null;
   private snapshotCbs = new Set<(snap: OfficeSnapshot) => void>();
+  private feedCbs = new Set<(feed: FeedItem[], notices: Notice[]) => void>();
   private readonly throttleMs: number;
   private readonly pingMs: number;
   /** Quem pode responder pelo escritório; padrão: Host local. A porta remota (http/remote.ts) troca a regra. */
@@ -57,6 +58,12 @@ export class Hub {
   onSnapshot(cb: (snap: OfficeSnapshot) => void): () => void {
     this.snapshotCbs.add(cb);
     return () => void this.snapshotCbs.delete(cb);
+  }
+
+  /** Avisado a cada lote de feed e avisos transmitido (ex.: o uplink da sede, central/uplink.ts). */
+  onFeed(cb: (feed: FeedItem[], notices: Notice[]) => void): () => void {
+    this.feedCbs.add(cb);
+    return () => void this.feedCbs.delete(cb);
   }
 
   /** Páginas conectadas por um Host local (localhost/127.x): quem pode responder pelo escritório. */
@@ -106,6 +113,15 @@ export class Hub {
     }
     if (r.feed.length) this.writeAll(frame('feed', r.feed));
     for (const n of r.notices) this.writeAll(frame('notice', n));
+    if (r.feed.length || r.notices.length) {
+      for (const cb of this.feedCbs) {
+        try {
+          cb(r.feed, r.notices);
+        } catch {
+          // quem escuta não atrapalha a transmissão
+        }
+      }
+    }
     return r.snapshot;
   }
 

@@ -32,7 +32,8 @@ do meio (0.**3**.0).
 
 - **Gateway do sistema na sede: agentes no banco e na web, com regras.** Ferramentas `sistema_*` no MCP do escritório:
   consultas no Postgres com o tenant aplicado (`SET LOCAL` + RLS, transação só de leitura, um comando por vez),
-  alterações com ensaio e **aprovação humana** (página Aprovações, também no celular), e o sistema pela interface web
+  alterações pedidas sem SQL (tabela, registros e valores) e aprovadas por uma pessoa num texto em português montado
+  dos dados reais ("Pedido 1: Situação de “aberto” para “pago”"; página Aprovações, também no celular), e o sistema pela interface web
   num navegador da sede já logado no tenant, com a **tela ao vivo** de cada agente (página Tela dos agentes). Regras por
   pessoa e tenant e auditoria de tudo. Guia: [docs/gateway.md](docs/gateway.md).
 - **Ferramentas do escritório no feed.** Perguntar, avisar e responder outros agentes e usar o sistema aparecem como

@@ -91,6 +91,59 @@ export class GatewayDb {
     return c.query({ text: sql, name: `gw_${randomBytes(6).toString('hex')}`, rowMode: 'array' });
   }
 
+  /**
+   * Roda `fn` numa transação de escrita com o tenant aplicado; `commit` false desfaz sempre. Usado pelas alterações
+   * estruturadas (change.ts), que montam o próprio SQL com parâmetros.
+   */
+  async tx<T>(tenant: string, commit: boolean, fn: (q: (sql: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[]; rowCount: number }>) => Promise<T>): Promise<T> {
+    const pool = this.write;
+    if (!pool) throw new Error(tr('o gateway não tem usuário de escrita (db.writeUrl)'));
+    const c = await pool.connect();
+    let done = false;
+    let broken = false;
+    try {
+      await this.begin(c, tenant, false);
+      const out = await fn(async (sql, values) => {
+        const r = await c.query({ text: sql, values: values ?? [], name: `gw_${randomBytes(6).toString('hex')}` });
+        return { rows: r.rows as Record<string, unknown>[], rowCount: r.rowCount ?? 0 };
+      });
+      if (commit) {
+        await c.query('COMMIT');
+        done = true;
+      }
+      return out;
+    } catch (err) {
+      broken = !isPgError(err) && !(err instanceof GatewayRefusal);
+      throw err;
+    } finally {
+      if (!done) await c.query('ROLLBACK').catch(() => (broken = true));
+      c.release(broken);
+    }
+  }
+
+  /** Colunas (nome e tipo) e chave primária de uma tabela que o usuário de leitura enxerga. */
+  async describeTable(schema: string, table: string): Promise<{ columns: Map<string, string>; pk: string[] }> {
+    const c = await this.read.connect();
+    try {
+      const cols = await c.query({
+        text: 'select column_name, data_type from information_schema.columns where table_schema = $1 and table_name = $2 order by ordinal_position',
+        values: [schema, table],
+        name: `gw_${randomBytes(6).toString('hex')}`,
+      });
+      const pk = await c.query({
+        text: `select k.column_name from information_schema.table_constraints t join information_schema.key_column_usage k
+               on k.constraint_name = t.constraint_name and k.table_schema = t.table_schema and k.table_name = t.table_name
+               where t.constraint_type = 'PRIMARY KEY' and t.table_schema = $1 and t.table_name = $2 order by k.ordinal_position`,
+        values: [schema, table],
+        name: `gw_${randomBytes(6).toString('hex')}`,
+      });
+      const columns = new Map((cols.rows as { column_name: string; data_type: string }[]).map((r) => [r.column_name, r.data_type]));
+      return { columns, pk: (pk.rows as { column_name: string }[]).map((r) => r.column_name) };
+    } finally {
+      c.release();
+    }
+  }
+
   async query(tenant: string, sql: string): Promise<QueryResult> {
     const c = await this.read.connect();
     let broken = false;
@@ -134,6 +187,9 @@ export class GatewayDb {
     }
   }
 }
+
+/** Recusa do próprio gateway (não do banco): a conexão segue boa. */
+export class GatewayRefusal extends Error {}
 
 function isPgError(err: unknown): boolean {
   return !!err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string';

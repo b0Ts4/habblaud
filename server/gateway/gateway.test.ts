@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { levelsFor, parseGatewayConfig, tenantsFor } from './config';
 import { firstWord, formatResult, GatewayDb, sqlProblem } from './db';
 import { GatewayService } from './service';
+import { buildSql, describeChange, planChange, applyChange, parseChange } from './change';
 import { credentialFor } from './web';
 
 const cfg = parseGatewayConfig({
@@ -67,26 +68,62 @@ describe('SQL dos agentes', () => {
 });
 
 describe('aprovações', () => {
-  it('só o dono (ou admin) decide; alteração nunca roda sem aprovação', async () => {
-    const changes: { commit: boolean }[] = [];
+  it('só o dono (ou admin) decide; nada é gravado sem aprovação; o texto é em português', async () => {
+    const commits: boolean[] = [];
+    const rows = [{ id: 3, tenant_id: 'acme', status: 'aberto' }];
     const db = {
-      change: async (_t: string, _s: string, commit: boolean) => (changes.push({ commit }), { columns: [], rows: [], rowCount: 2, truncated: false }),
+      describeTable: async () => ({ columns: new Map([['id', 'integer'], ['tenant_id', 'text'], ['status', 'text']]), pk: ['id'] }),
+      tx: async (_t: string, commit: boolean, fn: (q: (sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number }>) => Promise<unknown>) => {
+        commits.push(commit);
+        return fn(async (sql) => (sql.startsWith('SELECT') ? { rows, rowCount: 1 } : { rows: [{ ...rows[0], status: 'pago' }], rowCount: 1 }));
+      },
       close: async () => undefined,
     } as unknown as GatewayDb;
-    const g = new GatewayService({ config: cfg, auditFile: '/dev/null', db, web: undefined });
+    const config = { ...cfg, db: { ...cfg.db!, labels: { pedidos: { nome: 'Pedidos', singular: 'pedido', registro: 'Pedido {id}', colunas: { status: 'Situação' } } } } };
+    const g = new GatewayService({ config, auditFile: '/dev/null', db, web: undefined });
     const caller = { member: 'ana', memberName: 'Ana', agentId: 'ana~c:1', agentName: 'Nina' };
-    const r = await g.run(caller, 'alterar', { tenant: 'acme', sql: 'update pedidos set x=1', motivo: 'teste' });
-    expect(r).toMatchObject({ text: expect.stringContaining('Mexeria em 2') });
-    expect(changes).toEqual([{ commit: false }]);
-    expect(await g.run(caller, 'alterar', { tenant: 'acme', sql: 'update t set x=1', motivo: '' })).toMatchObject({ error: expect.any(String) });
-    expect(await g.run({ ...caller, member: 'bia' }, 'alterar', { tenant: 'acme', sql: 'update t set x=1', motivo: 'm' })).toMatchObject({ error: expect.any(String) });
+    const pedido = { tenant: 'acme', acao: 'atualizar', tabela: 'pedidos', onde: [{ coluna: 'id', valor: 3 }], valores: { status: 'pago' } };
+    const r = await g.run(caller, 'alterar', { ...pedido, explicacao: 'O cliente pagou por PIX' });
+    expect(r).toMatchObject({ text: expect.stringContaining('Pedido 3: Situação de “aberto” para “pago”') });
+    expect(commits).toEqual([false]);
+    expect(await g.run(caller, 'alterar', { ...pedido, explicacao: '' })).toMatchObject({ error: expect.stringContaining('português') });
+    expect(await g.run(caller, 'alterar', { ...pedido, onde: [], explicacao: 'x' })).toMatchObject({ error: expect.stringContaining('tabela inteira') });
+    expect(await g.run(caller, 'alterar', { ...pedido, valores: { tenant_id: 'beta' }, explicacao: 'x' })).toMatchObject({ error: expect.stringContaining('tenant') });
+    expect(await g.run({ ...caller, member: 'bia' }, 'alterar', { ...pedido, explicacao: 'x' })).toMatchObject({ error: expect.any(String) });
     const [a] = g.list({ id: 'ana' });
+    expect(a.summary.title).toBe('Vai alterar 1 pedido em Pedidos (ACME)');
     expect(g.list({ id: 'bia' })).toEqual([]);
     expect(await g.decide(a.id, { id: 'bia', name: 'Bia' }, true)).toMatchObject({ error: expect.any(String) });
     expect(await g.decide(a.id, { id: 'ana', name: 'Ana' }, true)).toMatchObject({ status: 'done' });
-    expect(changes).toEqual([{ commit: false }, { commit: true }]);
+    expect(commits).toEqual([false, true]);
     expect(await g.run(caller, 'alteracao', { id: a.id })).toMatchObject({ text: expect.stringContaining('aprovado por Ana') });
     expect(await g.decide(a.id, { id: 'ana', name: 'Ana' }, true)).toMatchObject({ error: expect.any(String) });
+  });
+});
+
+describe('texto das alterações', () => {
+  const base = { schema: 'public', table: 'clientes', sql: '', params: [], pk: ['id'] };
+  it('criar mostra os valores; apagar lista os registros; sem nomes amigáveis usa os da tabela', () => {
+    const criar = describeChange(
+      { ...base, request: { acao: 'criar', tabela: 'clientes', valores: { nome: 'Carla', email: 'c@x.com', tenant_id: 'acme', ativo: true } }, rowCount: 1, rows: [{ after: { id: 9, nome: 'Carla', email: 'c@x.com', tenant_id: 'acme', ativo: true } }] },
+      { nome: 'Clientes', singular: 'cliente' },
+      'ACME',
+      'tenant_id',
+    );
+    expect(criar).toEqual({ title: 'Vai criar 1 cliente em Clientes (ACME)', lines: ['nome: “Carla”; email: “c@x.com”; ativo: sim'] });
+    const apagar = describeChange(
+      { ...base, request: { acao: 'apagar', tabela: 'clientes', onde: [{ coluna: 'email', operador: 'contem', valor: '@velho' }] }, rowCount: 2, rows: [{ before: { id: 1 } }, { before: { id: 2 } }] },
+      undefined,
+      'ACME',
+    );
+    expect(apagar.title).toBe('Vai APAGAR 2 registros de clientes (ACME), onde email contém “@velho”');
+    expect(apagar.lines).toEqual(['Registro 1', 'Registro 2']);
+  });
+
+  it('o SQL montado usa só parâmetros para os valores', () => {
+    const r = buildSql({ acao: 'atualizar', tabela: 'pedidos', onde: [{ coluna: 'id', valor: "3'; drop table x; --" }], valores: { status: 'pago' } }, 'public', 'pedidos', []);
+    expect(r.sql).toBe('UPDATE "public"."pedidos" SET "status" = $2 WHERE "id" = $1');
+    expect(r.params).toEqual(["3'; drop table x; --", 'pago']);
   });
 });
 
@@ -94,12 +131,36 @@ describe('aprovações', () => {
 const PG = process.env.HABBLAUD_TEST_PG;
 describe.skipIf(!PG)('banco de verdade', () => {
   it('consulta só vê o tenant e não grava nada', async () => {
-    const db = new GatewayDb({ readUrl: PG!, tenantSetting: 'app.tenant_id', settings: {}, maxRows: 100, maxWriteRows: 10, timeoutMs: 5000, allowDelete: false });
+    const db = new GatewayDb({ readUrl: PG!, tenantSetting: 'app.tenant_id', settings: {}, maxRows: 100, maxWriteRows: 10, timeoutMs: 5000, allowDelete: false, labels: {} });
     try {
       const r = await db.query('acme', 'select distinct tenant_id from pedidos');
       expect(r.rows).toEqual([['acme']]);
       await expect(db.query('acme', 'update pedidos set valor = 0')).rejects.toThrow(/read-only/);
       await expect(db.query('acme', 'select 1; select 2')).rejects.toThrow(/multiple commands/);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it.skipIf(!process.env.HABBLAUD_TEST_PG_WRITE)('alteração estruturada: ensaio com antes e depois, grava só o ensaiado', async () => {
+    const dbc = { readUrl: PG!, writeUrl: process.env.HABBLAUD_TEST_PG_WRITE!, tenantSetting: 'app.tenant_id', settings: {}, maxRows: 100, maxWriteRows: 10, timeoutMs: 5000, allowDelete: false, tenantColumn: 'tenant_id', labels: {} };
+    const db = new GatewayDb(dbc);
+    try {
+      const req = parseChange({ acao: 'atualizar', tabela: 'pedidos', onde: [{ coluna: 'id', valor: 1 }], valores: { status: 'em_teste' } }, dbc);
+      const plan = await planChange(db, dbc, 'acme', req);
+      expect(plan.rowCount).toBe(1);
+      expect(plan.rows[0].before?.status).not.toBe('em_teste');
+      expect(plan.rows[0].after?.status).toBe('em_teste');
+      const old = plan.rows[0].before!.status;
+      // Nada gravado no ensaio.
+      expect((await db.query('acme', 'select status from pedidos where id = 1')).rows).toEqual([[old]]);
+      // De outro tenant, o mesmo filtro não acha nada (RLS).
+      await expect(planChange(db, dbc, 'beta', req)).rejects.toThrow(/nenhum registro/);
+      expect(await applyChange(db, 'acme', plan)).toBe(1);
+      expect((await db.query('acme', 'select status from pedidos where id = 1')).rows).toEqual([['em_teste']]);
+      const back = await planChange(db, dbc, 'acme', parseChange({ acao: 'atualizar', tabela: 'pedidos', onde: [{ coluna: 'id', valor: 1 }], valores: { status: old } }, dbc));
+      await applyChange(db, 'acme', back);
+      await expect(planChange(db, dbc, 'acme', parseChange({ acao: 'atualizar', tabela: 'pedidos', onde: [{ coluna: 'idx', valor: 1 }], valores: { status: 'x' } }, dbc))).rejects.toThrow(/coluna desconhecida/);
     } finally {
       await db.close();
     }

@@ -658,7 +658,7 @@ function describeMcp(name: string, input: Record<string, unknown>): ActivityDesc
       case 'sistema_consultar':
         return make('mcp', '🗄️', tr('Consultando o sistema ({0})', [str(input.tenant) || '?']), str(input.sql));
       case 'sistema_alterar':
-        return make('mcp', '✍️', tr('Pedindo para alterar o sistema ({0})', [str(input.tenant) || '?']), str(input.sql));
+        return make('mcp', '✍️', tr('Pedindo para alterar o sistema ({0})', [str(input.tenant) || '?']), str(input.explicacao) || str(input.motivo));
       case 'sistema_tenants':
         return make('mcp', '🏢', tr('Vendo os tenants liberados'));
     }

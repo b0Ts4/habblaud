@@ -89,16 +89,31 @@ const TOOLS = [
   {
     name: 'sistema_alterar',
     description:
-      'Pede para alterar o banco num tenant (INSERT ou UPDATE, um comando). Nada é gravado sem aprovação humana: o gateway ensaia, mostra quantas linhas mudariam e espera alguém aprovar na sede. Explique o motivo. / Ask for a DB change; needs human approval.',
+      'Pede para criar, atualizar ou apagar registros no banco do sistema num tenant. Não use SQL: diga a tabela, quais registros (onde) e os novos valores. Nada é gravado sem aprovação humana: o gateway ensaia a alteração e mostra a quem aprova, em português, o que muda em cada registro (ex.: "Pedido 3: status de aberto para pago"). Escreva a explicacao em português simples, para alguém que não entende de banco. / Ask for a DB change (structured, needs human approval).',
     inputSchema: {
       type: 'object',
       properties: {
         tenant: { type: 'string' },
-        sql: { type: 'string' },
-        motivo: { type: 'string', description: 'Por que a alteração é necessária (a pessoa lê isto para aprovar).' },
+        acao: { type: 'string', enum: ['criar', 'atualizar', 'apagar'] },
+        tabela: { type: 'string', description: 'Nome da tabela (ex.: pedidos). Veja as colunas com sistema_consultar se precisar.' },
+        onde: {
+          type: 'array',
+          description: 'Quais registros (obrigatório para atualizar e apagar). Todas as condições valem juntas.',
+          items: {
+            type: 'object',
+            properties: {
+              coluna: { type: 'string' },
+              operador: { type: 'string', enum: ['=', '!=', '>', '>=', '<', '<=', 'contem', 'vazio', 'nao_vazio'] },
+              valor: { type: ['string', 'number', 'boolean', 'null'] },
+            },
+            required: ['coluna'],
+          },
+        },
+        valores: { type: 'object', description: 'Coluna -> novo valor (para criar e atualizar). A coluna do tenant é preenchida pelo gateway.', additionalProperties: { type: ['string', 'number', 'boolean', 'null'] } },
+        explicacao: { type: 'string', description: 'Em português simples: o que muda e por quê (ex.: "Marcar o pedido 3 como pago: o cliente pagou por PIX, comprovante no chamado 123").' },
         esperar_segundos: { type: 'number', description: 'Quanto esperar a aprovação agora (0 a 600; padrão 0).' },
       },
-      required: ['tenant', 'sql', 'motivo'],
+      required: ['tenant', 'acao', 'tabela', 'explicacao'],
       additionalProperties: false,
     },
   },

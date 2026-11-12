@@ -6,7 +6,8 @@ import { appendFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { tr } from '../../shared/i18n';
 import { hasWebLevel, levelsFor, tenantsFor, type GatewayConfig, type WebLevel } from './config';
-import { formatResult, GatewayDb, sqlProblem, type QueryResult } from './db';
+import { formatResult, GatewayDb, sqlProblem } from './db';
+import { applyChange, describeChange, parseChange, planChange, type ChangePlan, type ChangeSummary } from './change';
 import { GatewayWeb, type WebSession } from './web';
 
 export interface Caller {
@@ -20,10 +21,15 @@ export interface Approval {
   id: string;
   caller: Caller;
   tenant: string;
-  sql: string;
+  tenantName: string;
+  /** O que o agente explicou, em português (por que e o quê). */
   reason: string;
-  /** Ensaio: quantas linhas mudaria (e as primeiras, com RETURNING). */
-  preview: string;
+  /** O que vai mudar, montado do ensaio com os dados reais (change.ts, describeChange). */
+  summary: ChangeSummary;
+  /** Detalhes técnicos (só para quem quiser conferir). */
+  sql: string;
+  params: unknown[];
+  plan: ChangePlan;
   status: 'pending' | 'approved' | 'denied' | 'failed' | 'done';
   decidedBy?: string;
   note?: string;
@@ -111,30 +117,32 @@ export class GatewayService {
     }
 
     if (action === 'alterar') {
-      if (lv.db !== 'write' || !this.db) throw new Error(tr('sem permissão para alterar o banco do tenant {0}', [tenant]));
-      const sql = String(args.sql ?? '');
-      const bad = sqlProblem(sql, 'write', cfg.db?.allowDelete);
-      if (bad) throw new Error(bad);
-      const reason = String(args.motivo ?? '').slice(0, 1000);
-      if (!reason.trim()) throw new Error(tr('explique o motivo da alteração (campo motivo): é o que a pessoa vai ler para aprovar'));
-      const dry: QueryResult = await this.db.change(tenant, sql, false);
+      if (lv.db !== 'write' || !this.db || !cfg.db) throw new Error(tr('sem permissão para alterar o banco do tenant {0}', [tenant]));
+      const reason = String(args.explicacao ?? args.motivo ?? '').trim().slice(0, 1000);
+      if (!reason) throw new Error(tr('explique em português simples o que muda e por quê (campo explicacao): é o que a pessoa vai ler para aprovar'));
+      const req = parseChange(args, cfg.db);
+      const plan = await planChange(this.db, cfg.db, tenant, req);
+      const tenantName = cfg.tenants[tenant] ?? tenant;
       const a: Approval = {
         id: `alt-${randomBytes(5).toString('hex')}`,
         caller: c,
         tenant,
-        sql,
+        tenantName,
         reason,
-        preview: tr('Mexeria em {0} linha(s).', [dry.rowCount]) + (dry.columns.length ? `\n${formatResult(dry)}` : ''),
+        summary: describeChange(plan, cfg.db.labels[plan.table] ?? cfg.db.labels[`${plan.schema}.${plan.table}`], tenantName, cfg.db.tenantColumn),
+        sql: plan.sql,
+        params: plan.params,
+        plan,
         status: 'pending',
         createdAt: Date.now(),
       };
       this.sweep();
       this.approvals.set(a.id, a);
-      this.audit(c, 'alterar:pedido', { tenant, sql, reason, id: a.id, preview: dry.rowCount });
+      this.audit(c, 'alterar:pedido', { tenant, id: a.id, reason, summary: a.summary, sql: a.sql, params: a.params, rows: plan.rowCount });
       this.deps.notify?.(a);
       const wait = Math.max(0, Math.min(600, Number(args.esperar_segundos) || 0));
       if (wait) return this.waitApproval(c, a.id, wait);
-      return { text: tr('Pedido de alteração {0} criado ({1}). Esperando aprovação humana na sede; confira com sistema_ver_alteracao.', [a.id, a.preview.split('\n')[0]]) };
+      return { text: tr('Pedido de alteração {0} criado e esperando aprovação humana na sede. A pessoa vai ler:\n{1}\n{2}\nConfira a decisão com sistema_ver_alteracao.', [a.id, a.summary.title, a.summary.lines.map((l) => `- ${l}`).join('\n')]) };
     }
 
     if (action.startsWith('web_')) {
@@ -191,10 +199,10 @@ export class GatewayService {
     } else {
       a.status = 'approved';
       try {
-        const r = await this.db!.change(a.tenant, a.sql, true);
+        const n = await applyChange(this.db!, a.tenant, a.plan);
         a.status = 'done';
-        a.result = tr('Gravado: {0} linha(s) alteradas.', [r.rowCount]) + (r.columns.length ? `\n${formatResult(r)}` : '');
-        this.audit(a.caller, 'alterar:gravado', { id, by: who.id, tenant: a.tenant, sql: a.sql, rows: r.rowCount });
+        a.result = tr('Gravado: {0} registro(s).', [n]);
+        this.audit(a.caller, 'alterar:gravado', { id, by: who.id, tenant: a.tenant, sql: a.sql, params: a.params, rows: n });
       } catch (err) {
         a.status = 'failed';
         a.result = (err as Error).message;
@@ -209,7 +217,7 @@ export class GatewayService {
   private describe(a: Approval): string {
     switch (a.status) {
       case 'pending':
-        return tr('Pedido {0} ainda esperando aprovação ({1}).', [a.id, a.preview.split('\n')[0]]);
+        return tr('Pedido {0} ainda esperando aprovação ({1}).', [a.id, a.summary.title]);
       case 'denied':
         return tr('Pedido {0} RECUSADO por {1}{2}. Nada foi gravado.', [a.id, a.decidedBy ?? '?', a.note ? `: ${a.note}` : '']);
       case 'failed':

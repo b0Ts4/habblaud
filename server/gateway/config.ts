@@ -5,6 +5,7 @@
 // docs/gateway.md.
 import { readFileSync } from 'node:fs';
 import { tr } from '../../shared/i18n';
+import type { TableLabels } from './change';
 
 /** none: nada; read: consultas (SELECT); write: consultas e alterações com aprovação humana. */
 export type DbLevel = 'none' | 'read' | 'write';
@@ -50,6 +51,10 @@ export interface GatewayConfig {
     maxWriteRows: number;
     timeoutMs: number;
     allowDelete: boolean;
+    /** Coluna do tenant nas tabelas (padrão tenant_id): o gateway preenche ao criar e não deixa trocar. */
+    tenantColumn?: string;
+    /** Nomes amigáveis para o texto das aprovações (tabela -> nome, singular, registro, colunas). */
+    labels: Record<string, TableLabels>;
   };
   web?: {
     baseUrl: string;
@@ -103,6 +108,8 @@ export function parseGatewayConfig(data: unknown): GatewayConfig {
       maxWriteRows: num(db.maxWriteRows, 50, 1, 10_000),
       timeoutMs: num(db.timeoutMs, 10_000, 500, 120_000),
       allowDelete: db.allowDelete === true,
+      tenantColumn: db.tenantColumn === '' ? undefined : typeof db.tenantColumn === 'string' ? db.tenantColumn : 'tenant_id',
+      labels: db.labels && typeof db.labels === 'object' ? (db.labels as Record<string, TableLabels>) : {},
     };
   }
   const web = f.web as Record<string, unknown> | undefined;

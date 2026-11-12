@@ -16,7 +16,7 @@ agente (PC da pessoa) ──MCP──▶ Habblaud local ──▶ sede ──▶
 | --- | --- |
 | `sistema_tenants` | lista os tenants liberados para a pessoa e o que pode em cada um |
 | `sistema_consultar` | um `SELECT` num tenant, só leitura |
-| `sistema_alterar` | pede um `INSERT`/`UPDATE` (e `DELETE`, se ligado): o gateway **ensaia** (roda e desfaz, para contar as linhas), e **nada é gravado** até uma pessoa aprovar |
+| `sistema_alterar` | pede para **criar, atualizar ou apagar** registros (apagar só se ligado), **sem SQL**: tabela, quais registros (`onde`), novos valores (`valores`) e uma `explicacao` em português simples. O gateway monta o SQL com parâmetros, **ensaia** (roda e desfaz) e **nada é gravado** até uma pessoa aprovar |
 | `sistema_ver_alteracao` | confere e espera a decisão de um pedido |
 | `sistema_web_abrir` / `ler` / `clicar` / `preencher` / `print` | usa o sistema pela interface web, num navegador já logado no tenant |
 
@@ -88,9 +88,31 @@ npx playwright install --with-deps chromium
 ele acabou de fazer. Cada pessoa vê os navegadores dos próprios agentes (de todos, se a política `terminal` da sede for
 `all`).
 
-## Aprovações
+## Aprovações (em português, sem SQL)
 
 Quando um agente pede uma alteração, o dono dele recebe um aviso no escritório, e o pedido aparece em **Aprovações**
-(`/aprovacoes`, ou o botão na barra), também pelo celular: o agente, a pessoa, o tenant, o motivo, o SQL exato e o
-ensaio ("mexeria em 3 linhas", com as linhas quando o SQL tem `RETURNING`). **Aprovar e gravar** roda de verdade e o
-agente recebe o resultado; **Recusar** (com nota) avisa o agente que nada foi gravado.
+(`/aprovacoes`, ou o botão na barra), também pelo celular, escrito para quem não entende de banco:
+
+> **Giovana (agente de Ana Souza)** · ACME Ltda
+> O agente explicou: “O João pagou o pedido 1 por PIX com o frete incluído (R$ 120). Comprovante no chamado 123.”
+> **Vai alterar 1 pedido em Pedidos (ACME Ltda):**
+> - Pedido 1: Situação de “aberto” para “pago”; Valor (R$) de “100.00” para “120.00”
+
+- O "o que vai mudar" sai do **ensaio com os dados reais** (antes e depois de cada registro), não do que o agente
+  disse: se a explicação e a alteração não batem, quem aprova vê.
+- O SQL fica escondido em **Detalhes técnicos**, para quem quiser conferir.
+- **Aprovar e gravar** roda de novo e só grava se mexer no mesmo número de registros do ensaio (se os dados mudaram no
+  meio, nada é gravado e o agente é avisado); **Recusar** (com nota) avisa o agente que nada foi gravado.
+- O gateway não altera nem apaga a tabela inteira (o filtro `onde` é obrigatório), preenche sozinho a coluna do tenant
+  ao criar (`tenantColumn`, padrão `tenant_id`) e não deixa trocá-la.
+
+### Nomes amigáveis
+
+Para o texto falar a língua do time, dê nomes às tabelas e colunas em `db.labels` (sem eles, usa os nomes do banco):
+
+```json
+"labels": {
+  "pedidos":  { "nome": "Pedidos", "singular": "pedido", "registro": "Pedido {id}", "colunas": { "status": "Situação", "valor": "Valor (R$)" } },
+  "clientes": { "nome": "Clientes", "singular": "cliente", "registro": "{nome}", "colunas": { "email": "E-mail" } }
+}
+```

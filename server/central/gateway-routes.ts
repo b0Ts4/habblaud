@@ -40,10 +40,12 @@ function approvalView(a: Approval, canDecide: boolean) {
     id: a.id,
     member: a.caller.memberName,
     agent: a.caller.agentName,
-    tenant: a.tenant,
-    sql: a.sql,
+    tenant: a.tenantName,
     reason: a.reason,
-    preview: a.preview,
+    title: a.summary.title,
+    lines: a.summary.lines,
+    sql: a.sql,
+    params: a.params,
     status: a.status,
     decidedBy: a.decidedBy,
     note: a.note,
@@ -118,6 +120,8 @@ main{padding:16px;max-width:1100px;margin:0 auto;display:grid;gap:14px}
 .ok{background:var(--ok)}.no{background:var(--no)}input{flex:1;min-width:160px;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#0b0e13;color:var(--fg)}
 .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;background:#253048}.empty{color:var(--dim);text-align:center;padding:40px 0}
 img{width:100%;border-radius:8px;border:1px solid var(--line);background:#fff}
+.why{margin:0;font-size:15px}.what{background:#0b0e13;border:1px solid var(--line);border-radius:8px;padding:10px 12px}.what ul{margin:6px 0 0;padding-left:20px}.what li{margin:3px 0}
+details summary{cursor:pointer}
 .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(min(100%,460px),1fr))}`;
 
 const APPROVALS_PAGE = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aprovações · Habblaud</title><style>${STYLE}</style></head>
@@ -133,8 +137,11 @@ async function load(){
   if(!d.approvals.length){list.append(el('p','empty','Nenhum pedido de alteração.'));return}
   for(const a of d.approvals){
     const c=el('section','card');
-    const h=el('div','row');h.append(el('strong','',a.agent+' ('+a.member+')'),el('span','tag','tenant '+a.tenant),el('span','tag',label[a.status]||a.status));
-    c.append(h,el('div','meta',new Date(a.createdAt).toLocaleString()),el('div','', 'Motivo: '+a.reason),el('pre','',a.sql),el('pre','',a.preview));
+    const h=el('div','row');h.append(el('strong','',a.agent+' (agente de '+a.member+')'),el('span','tag',a.tenant),el('span','tag',label[a.status]||a.status));
+    const why=el('p','why');why.append(el('span','meta','O agente explicou: '),el('span','','“'+a.reason+'”'));
+    const what=el('div','what');what.append(el('strong','',a.title+':'));const ul=el('ul');for(const l of a.lines)ul.append(el('li','',l));what.append(ul);
+    const det=el('details');det.append(el('summary','meta','Detalhes técnicos'),el('pre','',a.sql+'\\n'+JSON.stringify(a.params)));
+    c.append(h,el('div','meta',new Date(a.createdAt).toLocaleString()),why,what,det);
     if(a.result)c.append(el('pre','',a.result));
     if(a.decidedBy)c.append(el('div','meta','Decidido por '+a.decidedBy+(a.note?': '+a.note:'')));
     if(a.canDecide){

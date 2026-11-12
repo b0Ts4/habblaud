@@ -8,7 +8,12 @@
     "maxRows": 200,
     "maxWriteRows": 50,
     "timeoutMs": 10000,
-    "allowDelete": false
+    "allowDelete": false,
+    "tenantColumn": "tenant_id",
+    "labels": {
+      "pedidos": { "nome": "Pedidos", "singular": "pedido", "registro": "Pedido {id}", "colunas": { "status": "Situação", "valor": "Valor (R$)" } },
+      "clientes": { "nome": "Clientes", "singular": "cliente", "registro": "{nome}", "colunas": { "email": "E-mail" } }
+    }
   },
   "web": {
     "baseUrl": "https://app.suaempresa.com",

@@ -17,6 +17,8 @@ import type { CentralHub } from './hub';
 import type { PtyInfo, PtyStatus } from '../../shared/types';
 import { canControl, mapDetail, mapOutbox, mapPermission, mapPty, mapTerminalInit, splitId, type ViewerRights } from './merge';
 import type { MemberUpdate, Members, TunnelRequest } from './members';
+import { AskRegistry } from '../talk/registry';
+import { handleTalk } from './talk';
 
 /** Maior estado aceito de um membro (snapshot descomprimido). */
 const MAX_STATE = 16 * 1024 * 1024;
@@ -126,6 +128,8 @@ export function sseRewriter(event: string, map: (data: unknown) => unknown): Tra
 export function createCentralApp(deps: CentralAppDeps): (req: IncomingMessage, res: ServerResponse, url: URL) => boolean {
   const throttle = deps.throttle ?? new LoginThrottle();
   const { members, hub, sessions } = deps;
+  // Conversa entre agentes de computadores diferentes (central/talk.ts).
+  const talk = { config: deps.config, members, registry: new AskRegistry(), sendJson, readJson: <T>(req: IncomingMessage) => readJson<T>(req) };
 
   const rights = (m: Member): ViewerRights => {
     const cfg = deps.config();
@@ -200,6 +204,7 @@ export function createCentralApp(deps: CentralAppDeps): (req: IncomingMessage, r
         } else req.on('end', () => sendJson(res, 200, { ok: true }));
         return true;
       }
+      if (handleTalk(talk, m, req, res, url)) return true;
       req.resume();
       sendJson(res, 404, { error: tr('rota desconhecida') });
       return true;

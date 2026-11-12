@@ -12,10 +12,11 @@ import { errMsg } from '../log';
 
 /**
  * terminal: ver a conversa; messages: mandar mensagens; permissions: responder pedidos; control: abrir agentes novos,
- * digitar no terminal interativo e encerrar agentes neste computador (comandar o computador pela sede).
+ * digitar no terminal interativo e encerrar agentes neste computador (comandar o computador pela sede); agents: agentes de
+ * outros computadores conversando com os daqui.
  */
-export type CentralFeature = 'terminal' | 'messages' | 'permissions' | 'control';
-export const DEFAULT_CENTRAL_ALLOW: readonly CentralFeature[] = ['terminal', 'messages', 'permissions', 'control'];
+export type CentralFeature = 'terminal' | 'messages' | 'permissions' | 'control' | 'agents';
+export const DEFAULT_CENTRAL_ALLOW: readonly CentralFeature[] = ['terminal', 'messages', 'permissions', 'control', 'agents'];
 
 /** O que este computador oferece à sede (vai junto com o estado). */
 export interface CentralCaps {
@@ -52,7 +53,7 @@ export function parseCentralUplink(env: NodeJS.ProcessEnv): { config?: CentralUp
   const allow = new Set<CentralFeature>();
   const list = env.HABBLAUD_CENTRAL_ALLOW?.trim();
   for (const f of list === undefined || list === '' ? DEFAULT_CENTRAL_ALLOW : list.split(',').map((s) => s.trim())) {
-    if (f === 'terminal' || f === 'messages' || f === 'permissions' || f === 'control') allow.add(f);
+    if (f === 'terminal' || f === 'messages' || f === 'permissions' || f === 'control' || f === 'agents') allow.add(f);
   }
   return { config: { url: url.origin, token, allow } };
 }
@@ -80,6 +81,8 @@ const ROUTES: { method: 'GET' | 'POST'; re: RegExp; needs: CentralFeature | null
   { method: 'POST', re: /^\/api\/pty\/[^/]+\/(input|resize|close)$/, needs: 'control' },
   { method: 'POST', re: /^\/api\/agents\/[^/]+\/(stop|takeover)$/, needs: 'control' },
   { method: 'GET', re: /^\/api\/spawn\/folders$/, needs: 'control' },
+  // Agentes de outros computadores falando com os daqui (mensagem entra na sessão do agente).
+  { method: 'POST', re: /^\/api\/office\/deliver$/, needs: 'agents' },
 ];
 
 /** null = pode; senão o motivo da recusa. */

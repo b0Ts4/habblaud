@@ -9,6 +9,7 @@
 //
 // Segurança: quem controla um terminal destes executa comandos na máquina. O recurso é opt-in (HABBLAUD_PTY=1),
 // as rotas só aceitam conexões do próprio computador (ver http/pty.ts) e ele fica desligado no Docker.
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { chmodSync, readFileSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -77,6 +78,11 @@ export interface PtyManagerOptions {
   codexBin?: string;
   /** Contas do Codex (CODEX_HOME de cada uma). */
   codexAccounts?: () => PtyAccount[];
+  /**
+   * MCP do escritório (mod/habblaud-mcp/server.mjs) registrado em cada agente aberto aqui: o agente ganha as
+   * ferramentas para conversar com os outros agentes do time. `url` é a API local deste Habblaud.
+   */
+  mcp?: { script: string; url: string; node?: string };
   agent: (id: string) => PtyAgentRef | undefined;
   onChange: () => void;
   env?: NodeJS.ProcessEnv;
@@ -156,6 +162,8 @@ export function rawScreen(): PtyScreen {
 interface Pty {
   info: PtyInfo;
   proc: PtyProcess;
+  /** Chave do agente para o MCP do escritório (HABBLAUD_AGENT_KEY). */
+  key: string;
   screen: PtyScreen;
   clients: Set<ServerResponse>;
   /** Conectando: guardam a saída nova numa fila até a tela guardada ficar pronta. */
@@ -196,6 +204,34 @@ export interface PtyCreate {
   provider?: unknown;
   prompt?: unknown;
   login?: unknown;
+}
+
+/** Texto entre aspas para TOML (as regras de escape das strings básicas do TOML são as do JSON). */
+function toml(s: string): string {
+  return JSON.stringify(s);
+}
+
+/**
+ * Opções que registram o MCP do escritório na sessão (antes do `--` do pedido): `--mcp-config` com o JSON no Claude
+ * Code; `-c mcp_servers...` no Codex. A chave identifica o agente quando ele chama o MCP.
+ */
+export function mcpArgs(provider: Provider, mcp: { script: string; url: string; node?: string }, key: string): string[] {
+  const node = mcp.node ?? process.execPath;
+  const env = { HABBLAUD_URL: mcp.url, HABBLAUD_AGENT_KEY: key };
+  if (provider === 'codex') {
+    return [
+      '-c',
+      `mcp_servers.escritorio.command=${toml(node)}`,
+      '-c',
+      `mcp_servers.escritorio.args=[${toml(mcp.script)}]`,
+      '-c',
+      `mcp_servers.escritorio.env={ HABBLAUD_URL = ${toml(env.HABBLAUD_URL)}, HABBLAUD_AGENT_KEY = ${toml(env.HABBLAUD_AGENT_KEY)} }`,
+      // escritorio_perguntar espera a resposta do outro agente (até 10 min); o padrão do Codex é 60 s.
+      '-c',
+      'mcp_servers.escritorio.tool_timeout_sec=900',
+    ];
+  }
+  return ['--mcp-config', JSON.stringify({ mcpServers: { escritorio: { type: 'stdio', command: node, args: [mcp.script], env } } })];
 }
 
 /** Argumentos do processo: o pedido sempre depois de `--` (nunca vira opção nem subcomando). */
@@ -381,6 +417,24 @@ export class PtyManager {
     pty.screen.resize(c, r);
   }
 
+  /** O agente de um terminal aberto aqui, pela chave que o MCP do escritório recebeu. */
+  agentByKey(key: string): string | undefined {
+    for (const t of this.ptys.values()) if (t.key === key && t.info.exitedAt === undefined) return t.info.agentId;
+    return undefined;
+  }
+
+  /** Escreve no terminal do agente, se ele roda aqui: texto colado (bracketed paste) e Enter. */
+  deliver(agentId: string, text: string): boolean {
+    const t = [...this.ptys.values()].find((x) => x.info.agentId === agentId && x.info.exitedAt === undefined);
+    if (!t) return false;
+    t.proc.write(`\x1b[200~${text}\x1b[201~`);
+    // O Enter separado: algumas interfaces tratam o fim da colagem e o Enter juntos como parte do texto.
+    setTimeout(() => {
+      if (t.info.exitedAt === undefined) t.proc.write('\r');
+    }, 150).unref?.();
+    return true;
+  }
+
   /** Terminais do Codex ainda sem a conversa ligada (ver link). */
   unlinked(): PtyInfo[] {
     return [...this.ptys.values()].filter((t) => t.info.provider === 'codex' && !t.info.login && !t.info.linked && t.info.exitedAt === undefined).map((t) => ({ ...t.info }));
@@ -468,9 +522,13 @@ export class PtyManager {
     } else if (account.isDefault) delete env.CLAUDE_CONFIG_DIR;
     else env.CLAUDE_CONFIG_DIR = account.dir;
 
+    // Chave do agente para o MCP do escritório (quem está chamando); o login não é agente.
+    const key = randomUUID();
+    const mcp = this.opts.mcp && !plan.login ? mcpArgs(plan.provider, this.opts.mcp, key) : [];
+    if (mcp.length) env.HABBLAUD_AGENT_KEY = key;
     let proc: PtyProcess;
     try {
-      proc = spawn(codex ? this.opts.codexBin! : this.opts.claudeBin, ptyArgs(plan, p.resume), { cwd, cols, rows, env });
+      proc = spawn(codex ? this.opts.codexBin! : this.opts.claudeBin, [...mcp, ...ptyArgs(plan, p.resume)], { cwd, cols, rows, env });
     } catch (err) {
       throw new PtyError(500, codex ? tr('não consegui abrir o Codex: {0}', [errMsg(err)]) : tr('não consegui abrir o Claude Code: {0}', [errMsg(err)]));
     }
@@ -482,7 +540,7 @@ export class PtyManager {
     if (plan.login) info.login = true;
     if (p.resume) info.resumed = p.resume;
     if (p.from) info.fromAgent = p.from;
-    const pty: Pty = { info, proc, screen: this.createScreen(cols, rows), clients: new Set(), pending: new Map() };
+    const pty: Pty = { info, proc, key, screen: this.createScreen(cols, rows), clients: new Set(), pending: new Map() };
     this.ptys.set(id, pty);
     proc.onData((data) => {
       pty.screen.write(data);

@@ -25,6 +25,11 @@ do meio (0.**3**.0).
 - **Terminal interativo com o Codex.** Além do Claude Code, o terminal interativo abre o Codex (sessão nova, com pedido
   inicial, ou o login da conta), e a conversa nova do Codex é ligada ao terminal sozinha.
 
+- **Agentes conversando entre si, em qualquer computador do time.** Todo agente aberto pelo Habblaud ganha o MCP do
+  escritório (`mod/habblaud-mcp`): listar os agentes do time, perguntar e esperar a resposta, mandar avisos e
+  responder. A mensagem entra na sessão do outro agente marcada `[Escritório]`, com o id para responder. Roteado pela
+  sede (política `agents`, liberação `agents` em cada computador) ou, sem sede, entre os agentes do mesmo computador.
+
 ### Corrigido
 
 - **Celular: o terminal interativo ficava atrás da barra superior.** Agora ocupa a tela inteira, como o terminal ao vivo.

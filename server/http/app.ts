@@ -52,6 +52,8 @@ export interface ApiDeps {
    * terminal e HABBLAUD_MENSAGENS); a trava do Host local é conferida aqui antes de chamá-las.
    */
   messages?: (req: IncomingMessage, res: ServerResponse, path: string) => void;
+  /** Conversa entre agentes (MCP do escritório, server/talk/local.ts): só pelo próprio computador. */
+  talk?: (req: IncomingMessage, res: ServerResponse, url: URL) => void;
   /**
    * Terminal interativo e ações nos agentes (/api/pty/*, POST /api/agents/:id/stop|takeover; http/pty.ts).
    * Ausente = desligado (sem HABBLAUD_PTY=1, Docker, sem node-pty ou sem bind local).
@@ -630,6 +632,13 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           })
           .catch((err) => fail(res, err));
       }
+      return true;
+    }
+    if (path.startsWith('/api/office/')) {
+      // O MCP do escritório roda neste computador; pela porta remota (celular) ou por outro Host, nunca.
+      if (!deps.talk) sendJson(res, 404, { error: tr('conversa entre agentes desligada') });
+      else if (isRemote(req) || !isLoopbackHost(req.headers.host)) sendJson(res, 403, { error: tr('a conversa entre agentes só é usada pelo próprio computador') });
+      else deps.talk(req, res, url);
       return true;
     }
     if (isMessagesPath(path)) {

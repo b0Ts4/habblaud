@@ -19,9 +19,11 @@ export interface CentralPolicy {
   messages: Scope;
   /** Responder pedidos de permissão pela página. */
   permissions: Scope;
+  /** Agentes conversando entre si (MCP do escritório): "all" = com os de qualquer pessoa. */
+  agents: Scope;
 }
 
-export const DEFAULT_POLICY: CentralPolicy = { terminal: 'all', messages: 'own', permissions: 'own' };
+export const DEFAULT_POLICY: CentralPolicy = { terminal: 'all', messages: 'own', permissions: 'own', agents: 'all' };
 
 export interface MemberRecord {
   /** Login e prefixo dos ids (ex.: "bruno"). */
@@ -88,6 +90,7 @@ export function parseCentralFile(data: unknown): CentralConfig {
       terminal: scope(p.terminal, DEFAULT_POLICY.terminal),
       messages: scope(p.messages, DEFAULT_POLICY.messages),
       permissions: scope(p.permissions, DEFAULT_POLICY.permissions),
+      agents: scope(p.agents, DEFAULT_POLICY.agents),
     },
     members,
   };

@@ -58,6 +58,8 @@ import { OwnerSocial } from './world/social';
 import { BuildingTokens } from './world/tokens';
 import { BuildingUplink } from './world/uplink';
 import { CentralUplink, parseCentralUplink } from './central/uplink';
+import { CentralTalk } from './talk/central';
+import { createTalkRoutes, LocalTalk, type Deliver } from './talk/local';
 import { WorldViewer } from './world/viewer';
 
 const config = loadConfig();
@@ -309,6 +311,8 @@ const ptys = spawnPty
       claudeBin: claudeBin ?? 'claude',
       accounts: () => accounts.entries().map((a) => ({ id: a.id, dir: a.dir, isDefault: isDefaultDir(a.dir, config.home) })),
       codexBin: ptyCodexBin,
+      // Cada agente aberto aqui ganha o MCP do escritório (conversar com os outros agentes do time).
+      mcp: { script: join(config.rootDir, 'mod', 'habblaud-mcp', 'server.mjs'), url: `http://127.0.0.1:${config.port}` },
       codexAccounts: () =>
         accounts.entriesOf('codex').map((a) => {
           const dir = a.detected.configDir;
@@ -376,6 +380,28 @@ const central = centralCfg.config
     })
   : undefined;
 central?.start();
+// Conversa entre agentes (MCP do escritório): entrega no terminal do agente, se ele roda aqui, ou pelas mensagens
+// pelo escritório (plugin habblaud-mensagens / codex queue). Roteada pela sede, se houver; senão, só entre os daqui.
+const deliverToAgent: Deliver = (agentId, text) => {
+  if (ptys?.deliver(agentId, text)) return { ok: true };
+  if (!messages) return { error: tr('este agente não recebe mensagens: abra-o pelo Habblaud (Novo agente) ou instale o plugin de mensagens') };
+  const r = messages.send({ agentId, text });
+  if ('message' in r) return { ok: true };
+  return { error: r.error === 'unavailable' ? r.reason : r.error === 'not-found' ? tr('agente não encontrado neste computador') : tr('mensagens demais esperando a entrega para este agente') };
+};
+const localTalk = new LocalTalk(() => office.list(), (roomId) => office.roomName(roomId), deliverToAgent);
+const centralTalk = centralCfg.config?.allow.has('agents') ? new CentralTalk(centralCfg.config.url, centralCfg.config.token) : undefined;
+const talk = createTalkRoutes({
+  whoIs: (who) => {
+    const byKey = who.key ? ptys?.agentByKey(who.key) : undefined;
+    if (byKey) return office.get(byKey);
+    // Sessão do Claude Code aberta à mão com o MCP registrado: o processo pai do MCP é o Claude Code ("<conta>:<pid>").
+    if (who.ppid) return office.list().find((a) => a.kind === 'main' && a.id.endsWith(`:${who.ppid}`));
+    return undefined;
+  },
+  backend: () => centralTalk ?? localTalk,
+  deliver: deliverToAgent,
+});
 const ticker = setInterval(() => {
   try {
     office.tick();
@@ -404,6 +430,7 @@ const api = createApiHandler({
   timeline: createTimelineHandler({ dir: timelineDir, recording: !!timeline }),
   permissions: permissions ? createPermissionRoutes(permissions) : undefined,
   messages: messages ? createMessageRoutes(messages) : undefined,
+  talk,
   pty: ptys ? createPtyRoutes(ptys) : undefined,
   spawn,
   attachments,

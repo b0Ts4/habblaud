@@ -157,7 +157,7 @@ describe('uplink', () => {
     const ok = parseCentralUplink({ HABBLAUD_CENTRAL_URL: 'https://sede.x/', HABBLAUD_CENTRAL_TOKEN: 't', HABBLAUD_CENTRAL_ALLOW: 'terminal,permissions,xyz' });
     expect(ok.config?.url).toBe('https://sede.x');
     expect([...ok.config!.allow]).toEqual(['terminal', 'permissions']);
-    expect([...parseCentralUplink({ HABBLAUD_CENTRAL_URL: 'http://localhost:4800', HABBLAUD_CENTRAL_TOKEN: 't' }).config!.allow]).toEqual(['terminal', 'messages', 'permissions', 'control']);
+    expect([...parseCentralUplink({ HABBLAUD_CENTRAL_URL: 'http://localhost:4800', HABBLAUD_CENTRAL_TOKEN: 't' }).config!.allow]).toEqual(['terminal', 'messages', 'permissions', 'control', 'agents']);
   });
 
   it('lê SSE em pedaços', async () => {

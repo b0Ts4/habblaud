@@ -1,0 +1,14 @@
+retry: 2000
+
+event: reset
+data: "[agente falso] pid 6052, mcp: sim, args: \u001b[1B\u001b[41D"
+
+event: data
+data: "PERGUNTE Ricardo|oi, tudo certo?\r\n"
+
+event: data
+data: "[agente falso] recebi: PERGUNTE Ricardo|oi, tudo certo?\r\n"
+
+event: data
+data: "[agente falso] resultado: Resposta de Ricardo:\r\nOi! Aqui é o agente do pid 6062. A tabela de pedidos usa tenant_id.\r\n"
+

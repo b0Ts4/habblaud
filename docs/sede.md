@@ -112,8 +112,9 @@ qual for a política da sede:
 | `messages` | mandar mensagens aos agentes daqui (como se digitadas no terminal) |
 | `permissions` | aprovar/recusar pedidos de permissão dos agentes daqui |
 | `control` | abrir agentes novos, digitar no terminal deles, fazer login das contas e encerrar agentes (só pelo dono) |
+| `agents` | agentes de outros computadores mandarem mensagens aos agentes daqui (MCP do escritório) |
 
-O padrão é `terminal,messages,permissions,control`. Detalhes de agente (o histórico que o escritório já mostra) vão sempre. Nada além
+O padrão é `terminal,messages,permissions,control,agents`. Detalhes de agente (o histórico que o escritório já mostra) vão sempre. Nada além
 dessas rotas passa pelo túnel: terminal interativo, Novo agente, arquivos e o Habblaud World ficam de fora.
 
 > Para uso no escritório, desligue o Habblaud World público: `HABBLAUD_WORLD=0`.
@@ -137,6 +138,33 @@ confere isso em cada pedido, e o seu computador confere de novo o `control` no `
 > Primeira vez com o Codex neste computador? Depois do primeiro login, reinicie o Habblaud local para ele passar a
 > mostrar as conversas do Codex no escritório.
 
+## Agentes conversando entre si
+
+Todo agente aberto pelo Habblaud (Novo agente) ganha o **MCP do escritório** (`mod/habblaud-mcp/server.mjs`), sem
+configurar nada. Com ele, um agente fala com o de qualquer pessoa do time, em qualquer computador ligado à sede:
+
+| Ferramenta | O que faz |
+| --- | --- |
+| `escritorio_agentes` | lista os agentes do time: nome, pessoa, projeto, ferramenta e o que estão fazendo |
+| `escritorio_perguntar` | pergunta e espera a resposta (até 10 min; se demorar, devolve o id para conferir depois) |
+| `escritorio_enviar` | manda um aviso sem esperar resposta |
+| `escritorio_ver_resposta` | confere a resposta de uma pergunta anterior |
+| `escritorio_responder` | responde uma mensagem recebida (ela chega com o id) |
+| `escritorio_pendentes` | lista as perguntas recebidas que ainda esperam resposta |
+
+O agente chama o outro pelo nome ("Cecília"), por "Nome @ Pessoa" ("Cecília @ Bia") ou pelo id. A mensagem entra na
+sessão do outro agente como se alguém tivesse digitado, marcada `[Escritório]`, com quem mandou e o id para
+responder. Basta pedir em linguagem natural: *"pergunte à Cecília da Bia qual coluna separa os tenants"*.
+
+- **Sem sede**, funciona entre os agentes do mesmo computador.
+- **Quem fala com quem:** a política `agents` da sede (`all`, o padrão, ou `own`: só com os agentes da mesma pessoa)
+  e o `agents` no `HABBLAUD_CENTRAL_ALLOW` de cada computador (sem ele, ninguém de fora entrega mensagens aos agentes
+  dali).
+- **Sessão do Claude Code aberta à mão** (fora do Habblaud): registre o MCP uma vez e ele reconhece a sessão:
+  `claude mcp add escritorio --scope user -- node <pasta do Habblaud>/mod/habblaud-mcp/server.mjs`. Para receber
+  mensagens, a sessão precisa do plugin de mensagens (`npm run mod:install`). Agentes do Codex conversam quando abertos
+  pelo Habblaud.
+
 ## Política: quem faz o quê com os agentes dos outros
 
 ```bash
@@ -148,6 +176,7 @@ npm run central:member -- policy terminal=all messages=own permissions=own
 | `terminal` | cada um vê só o terminal dos próprios agentes | todos veem o de todos | `all` |
 | `messages` | cada um manda mensagem só aos próprios agentes | a qualquer agente | `own` |
 | `permissions` | cada um responde só os próprios pedidos | os de qualquer um | `own` |
+| `agents` | agentes só conversam com os da mesma pessoa | com os de qualquer pessoa | `all` |
 
 Administradores (`--admin`) fazem tudo. A página de cada pessoa só oferece o que ela pode fazer; a sede confere de
 novo em cada pedido, e o computador do dono confere mais uma vez contra o `HABBLAUD_CENTRAL_ALLOW`.
@@ -166,7 +195,6 @@ novo em cada pedido, e o computador do dono confere mais uma vez contra o `HABBL
 ## Próximos passos (planejados)
 
 - **Anexos e ditado** no Novo agente pela sede (hoje só o pedido em texto).
-- **Agentes conversando entre si**, entre computadores, pela sede (`list`, `ask`, `check`, no estilo do Maestri).
 - **Gateway do sistema**: acesso dos agentes ao sistema da empresa (Postgres com RLS por `tenant_id` e navegador
   controlado), com regras por tenant e papel, aprovação humana e auditoria.
 - **Tela ao vivo do navegador** do agente quando ele estiver mexendo no sistema pela web.

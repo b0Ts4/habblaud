@@ -108,7 +108,7 @@ switch (cmd) {
     const policy = { ...(data.policy ?? {}) };
     for (const kv of [id, ...rest].filter(Boolean)) {
       const [k, v] = kv.split('=');
-      if (!['terminal', 'messages', 'permissions'].includes(k) || (v !== 'own' && v !== 'all')) die(`regra inválida: ${kv} (ex.: terminal=all)`);
+      if (!['terminal', 'messages', 'permissions', 'agents'].includes(k) || (v !== 'own' && v !== 'all')) die(`regra inválida: ${kv} (ex.: terminal=all)`);
       policy[k as 'terminal'] = v as Scope;
     }
     data.policy = policy;
@@ -119,7 +119,7 @@ switch (cmd) {
   case 'list':
   case undefined: {
     console.log(`${file}`);
-    console.log(`política: ${JSON.stringify(data.policy ?? {})} (padrão: terminal=all messages=own permissions=own)`);
+    console.log(`política: ${JSON.stringify(data.policy ?? {})} (padrão: terminal=all messages=own permissions=own agents=all)`);
     for (const m of data.members) console.log(`  ${m.id.padEnd(16)} ${m.name}${m.admin ? '  [admin]' : ''}`);
     if (!data.members.length) console.log('  (nenhum membro)');
     break;

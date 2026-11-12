@@ -40,6 +40,11 @@ do meio (0.**3**.0).
   testar); o navegador dos agentes de cada pessoa entra com o login dela, refaz o login quando a sessão expira, e as
   permissões do próprio sistema continuam valendo. Sistemas com um subdomínio por cliente: `"tenants": "*"` e
   `allowedHosts` com `*.dominio`.
+- **Navegador livre para sites externos.** Ferramentas `navegador_*`: qualquer site público num navegador da sede sem
+  login, com a tela ao vivo, nunca a rede interna (rede local, a própria VPS, metadados da nuvem). Ligado para todos por
+  padrão; `externo` no `gateway.json` limita. Suporte a proxy de saída (`HABBLAUD_GATEWAY_PROXY`).
+- **Verificador de RLS.** `npm run gateway:verificar-rls -- "postgres://..."` mostra em português as tabelas com
+  `tenant_id`, se o RLS está ligado, as políticas, a variável de sessão que elas leem e quem passa por cima do RLS.
 - **Ferramentas do escritório no feed.** Perguntar, avisar e responder outros agentes e usar o sistema aparecem como
   atividades com frases próprias.
 - **Instalação em um comando.** `npm run membro:configurar` liga o computador à sede (e, se pedido, sobe junto com o

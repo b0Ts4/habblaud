@@ -128,6 +128,11 @@ describe('MCP do escritório', () => {
       'sistema_web_clicar',
       'sistema_web_preencher',
       'sistema_web_print',
+      'navegador_abrir',
+      'navegador_ler',
+      'navegador_clicar',
+      'navegador_preencher',
+      'navegador_print',
     ]);
     expect(byId.get(3)).toMatchObject({ isError: true });
   });

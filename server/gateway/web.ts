@@ -2,6 +2,8 @@
 // sede (Playwright). Uma sessão por agente e tenant, já logada com a credencial do tenant (o agente nunca a vê); a
 // navegação fica presa aos hosts do sistema. A cada ação a sessão guarda um print, que a página da sede mostra ao vivo
 // ("tela do agente").
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { createRequire } from 'node:module';
 import { tr } from '../../shared/i18n';
 import { hostAllowed, type GatewayConfig, type WebCredential } from './config';
@@ -50,6 +52,45 @@ export function credentialFor(cfg: WebConfig, tenant: string, env: NodeJS.Proces
 
 function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? '');
+}
+
+/** "Tenant" das sessões do navegador livre (sites externos, sem login). */
+export const EXTERNAL = '__externo__';
+
+/** Endereço de rede interna (da própria sede ou da rede dela): o navegador livre nunca vai lá. */
+export function privateAddress(ip: string): boolean {
+  const v = ip.toLowerCase().replace(/^::ffff:/, '');
+  if (isIP(v) === 4) {
+    const [a, b] = v.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+  }
+  return v === '::' || v === '::1' || v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe8') || v.startsWith('fe9') || v.startsWith('fea') || v.startsWith('feb');
+}
+
+/** O navegador livre pode ir a este endereço? Só http(s) público (o nome é resolvido e conferido). */
+export async function publicUrl(
+  url: string,
+  resolve: (host: string) => Promise<string[]> = async (h) => (await lookup(h, { all: true })).map((r) => r.address),
+  /** A sede sai para a internet por um proxy (HABBLAUD_GATEWAY_PROXY): quem resolve os nomes é ele. */
+  viaProxy = false,
+): Promise<boolean> {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return false;
+  if (isIP(host)) return !privateAddress(host);
+  try {
+    const ips = await resolve(host);
+    return ips.length > 0 && !ips.some(privateAddress);
+  } catch {
+    // Sem DNS aqui: só pelo proxy (que alcança a internet, não a rede interna); sem proxy, recusa.
+    return viaProxy;
+  }
 }
 
 /** Sessões que ficam paradas por mais que isto fecham sozinhas. */
@@ -102,7 +143,8 @@ export class GatewayWeb {
     this.browser ??= (async () => {
       const pw = loadPlaywright();
       const exe = this.env.HABBLAUD_GATEWAY_CHROMIUM?.trim();
-      return pw.chromium.launch({ headless: true, ...(exe ? { executablePath: exe } : {}), args: ['--no-sandbox'] });
+      const proxy = this.env.HABBLAUD_GATEWAY_PROXY?.trim();
+      return pw.chromium.launch({ headless: true, ...(exe ? { executablePath: exe } : {}), ...(proxy ? { proxy: { server: proxy } } : {}), args: ['--no-sandbox'] });
     })();
     this.browser.catch(() => (this.browser = null));
     return this.browser;
@@ -117,6 +159,32 @@ export class GatewayWeb {
     }
   }
 
+  /** Cache curto da conferência de endereço público (cada página pede dezenas de recursos do mesmo host). */
+  private publicCache = new Map<string, { ok: boolean; at: number }>();
+  private async isPublic(url: string): Promise<boolean> {
+    let host = '';
+    try {
+      const u = new URL(url);
+      host = `${u.protocol}//${u.host}`;
+    } catch {
+      return false;
+    }
+    const hit = this.publicCache.get(host);
+    if (hit && Date.now() - hit.at < 60_000) return hit.ok;
+    const ok = await publicUrl(url, undefined, !!this.env.HABBLAUD_GATEWAY_PROXY?.trim());
+    this.publicCache.set(host, { ok, at: Date.now() });
+    return ok;
+  }
+
+  /** Navegador livre: abre um site externo (qualquer endereço público). */
+  async openExternal(s: WebSession, url: string): Promise<string> {
+    const full = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    if (!(await this.isPublic(full))) throw new Error(tr('endereço não permitido no navegador livre (só sites públicos; nada da rede interna): {0}', [full]));
+    await s.page.goto(full, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    await this.snap(s, tr('abriu {0}', [new URL(full).host]));
+    return this.read(s);
+  }
+
   /** Endereço absoluto dentro do sistema; recusa sair dele. */
   resolve(tenant: string, path: string | undefined): string {
     const start = fill(this.cfg.tenantUrl ?? '{base}', { base: this.cfg.baseUrl, tenant });
@@ -128,16 +196,22 @@ export class GatewayWeb {
   /** Sessão do agente no tenant (abre e faz o login na primeira vez). */
   async session(member: string, agentId: string, agentName: string, tenant: string, memberName = member): Promise<WebSession> {
     const id = `${agentId}|${tenant}`;
+    const external = tenant === EXTERNAL;
     const have = this.sessions.get(id);
     if (have && !have.page.isClosed()) return have;
     const browser = await this.launch();
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'pt-BR' });
     // Nada fora do sistema: nem navegação, nem recursos (scripts e imagens de terceiros).
-    await context.route('**/*', (route: any) => (this.allowed(route.request().url()) || route.request().url().startsWith('data:') ? route.continue() : route.abort()));
+    // Sistema da empresa: nada fora dos hosts dele. Navegador livre: qualquer site público, nunca a rede interna.
+    await context.route('**/*', async (route: any) => {
+      const url: string = route.request().url();
+      const ok = url.startsWith('data:') || url.startsWith('blob:') || (external ? await this.isPublic(url) : this.allowed(url));
+      return ok ? route.continue() : route.abort();
+    });
     const page = await context.newPage();
     const s: WebSession = { id, member, memberName, agentId, agentName, tenant, page, url: '', title: '', lastAction: tr('abrindo'), lastAt: Date.now() };
     this.sessions.set(id, s);
-    if (this.cfg.login) await this.login(s);
+    if (this.cfg.login && !external) await this.login(s);
     return s;
   }
 
@@ -151,7 +225,7 @@ export class GatewayWeb {
 
   /** A página atual é a tela de login (a sessão do sistema expirou ou nunca entrou). */
   private onLoginPage(s: WebSession): boolean {
-    if (!this.cfg.login) return false;
+    if (!this.cfg.login || s.tenant === EXTERNAL) return false;
     try {
       return new URL(s.page.url()).pathname.replace(/\/+$/, '') === new URL(this.loginUrl(s.tenant)).pathname.replace(/\/+$/, '');
     } catch {
@@ -228,7 +302,7 @@ export class GatewayWeb {
     await el.click({ timeout: 10_000 });
     await s.page.waitForLoadState('domcontentloaded').catch(() => undefined);
     await s.page.waitForTimeout(300);
-    if (!this.allowed(s.page.url())) {
+    if (s.tenant !== EXTERNAL && !this.allowed(s.page.url())) {
       await s.page.goBack().catch(() => undefined);
       throw new Error(tr('o clique levou para fora do sistema; voltei'));
     }

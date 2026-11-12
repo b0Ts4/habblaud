@@ -7,7 +7,8 @@ import { join as pjoin } from 'node:path';
 import { firstWord, formatResult, GatewayDb, sqlProblem } from './db';
 import { GatewayService } from './service';
 import { buildSql, describeChange, planChange, applyChange, parseChange } from './change';
-import { credentialFor } from './web';
+import { credentialFor, privateAddress, publicUrl } from './web';
+import { externalLevelFor } from './config';
 
 const cfg = parseGatewayConfig({
   tenants: { acme: 'ACME', beta: 'Beta' },
@@ -197,5 +198,32 @@ describe('sistema com um subdomínio por cliente e login de cada pessoa', () => 
     expect(new CredentialStore(pjoin(dir, 'c.json'), pjoin(dir, 'k')).get('ana', 'acme')?.password).toBe('segredo-geral');
     store.remove('ana', 'beta');
     expect(store.get('ana', 'beta')?.user).toBe('ana@x.com');
+  });
+});
+
+describe('navegador livre (sites externos)', () => {
+  it('nunca vai à rede interna da sede', async () => {
+    for (const ip of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.0.10', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:127.0.0.1']) expect(privateAddress(ip)).toBe(true);
+    for (const ip of ['8.8.8.8', '172.32.0.1', '2606:4700::1']) expect(privateAddress(ip)).toBe(false);
+    const dns = async (h: string) => (h === 'interno.empresa.com' ? ['10.0.0.5'] : ['93.184.215.14']);
+    expect(await publicUrl('https://exemplo.com/x', dns)).toBe(true);
+    expect(await publicUrl('https://interno.empresa.com/', dns)).toBe(false);
+    expect(await publicUrl('http://169.254.169.254/latest/meta-data', dns)).toBe(false);
+    expect(await publicUrl('http://localhost:4800/', dns)).toBe(false);
+    expect(await publicUrl('file:///etc/passwd', dns)).toBe(false);
+    expect(await publicUrl('https://x.localhost/', dns)).toBe(false);
+    const semDns = async () => {
+      throw new Error('ENOTFOUND');
+    };
+    expect(await publicUrl('https://exemplo.com/', semDns)).toBe(false);
+    expect(await publicUrl('https://exemplo.com/', semDns, true)).toBe(true);
+    expect(await publicUrl('http://10.0.0.5/', semDns, true)).toBe(false);
+  });
+
+  it('ligado para todos por padrão; dá para limitar', () => {
+    expect(externalLevelFor(cfg, 'qualquer')).toBe('interact');
+    const off = parseGatewayConfig({ externo: false, rules: [{ members: ['ana'], tenants: ['*'], externo: 'view' }] });
+    expect(externalLevelFor(off, 'bia')).toBe('none');
+    expect(externalLevelFor(off, 'ana')).toBe('view');
   });
 });

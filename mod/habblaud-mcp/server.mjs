@@ -147,6 +147,33 @@ const TOOLS = [
     description: 'Tira um print da página atual do sistema. / Screenshot of the current page.',
     inputSchema: { type: 'object', properties: { tenant: { type: 'string' } }, required: ['tenant'], additionalProperties: false },
   },
+  // ---- Navegador livre (sites externos, pela sede, com a tela ao vivo) -------------------------------------------
+  {
+    name: 'navegador_abrir',
+    description:
+      'Abre um site externo (qualquer site público da internet) num navegador da sede, sem login nenhum; a pessoa acompanha a tela ao vivo. Para o sistema da empresa use sistema_web_abrir. Devolve a estrutura da página. / Open a public website.',
+    inputSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'], additionalProperties: false },
+  },
+  {
+    name: 'navegador_ler',
+    description: 'Lê a página atual do navegador livre: título, endereço, botões, campos e texto. / Read the current page.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'navegador_clicar',
+    description: 'Clica num botão, link ou texto da página do navegador livre (nome visível ou seletor CSS). / Click.',
+    inputSchema: { type: 'object', properties: { alvo: { type: 'string' } }, required: ['alvo'], additionalProperties: false },
+  },
+  {
+    name: 'navegador_preencher',
+    description: 'Preenche um campo da página do navegador livre (rótulo, placeholder ou seletor CSS). / Fill a field.',
+    inputSchema: { type: 'object', properties: { campo: { type: 'string' }, valor: { type: 'string' } }, required: ['campo', 'valor'], additionalProperties: false },
+  },
+  {
+    name: 'navegador_print',
+    description: 'Print da página atual do navegador livre. / Screenshot.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
 ];
 
 async function api(method, path, body, timeoutMs = 30_000) {
@@ -209,8 +236,8 @@ async function call(name, args) {
       return asks.map((a) => `- id ${a.id}, de ${a.from}: ${a.text}`).join('\n');
     }
     default: {
-      if (!name?.startsWith('sistema_')) throw new Error(`ferramenta desconhecida: ${name}`);
-      const action = name === 'sistema_ver_alteracao' ? 'alteracao' : name.slice('sistema_'.length);
+      if (!name?.startsWith('sistema_') && !name?.startsWith('navegador_')) throw new Error(`ferramenta desconhecida: ${name}`);
+      const action = name === 'sistema_ver_alteracao' ? 'alteracao' : name.startsWith('navegador_') ? `livre_${name.slice('navegador_'.length)}` : name.slice('sistema_'.length);
       const wait = Number(args.esperar_segundos) || 0;
       const r = await api('POST', '/api/office/gateway', { who: WHO, action, args }, (Math.min(600, wait) + 120) * 1000);
       if (r.error) throw new Error(r.error);
@@ -237,7 +264,7 @@ async function handle(msg) {
           capabilities: { tools: {} },
           serverInfo: { name: 'habblaud-escritorio', version: VERSION },
           instructions:
-            'Você está no escritório do time (Habblaud). Com as ferramentas escritorio_* você conversa com os agentes das outras pessoas e dos outros projetos; quando uma mensagem chegar marcada [Escritório] com um id, responda com escritorio_responder. Com as ferramentas sistema_* você acessa o sistema da empresa (banco e web) pelo gateway da sede, só nos tenants liberados (veja sistema_tenants); alterações no banco esperam aprovação humana.',
+            'Você está no escritório do time (Habblaud). Com as ferramentas escritorio_* você conversa com os agentes das outras pessoas e dos outros projetos; quando uma mensagem chegar marcada [Escritório] com um id, responda com escritorio_responder. Com as ferramentas sistema_* você acessa o sistema da empresa (banco e web) pelo gateway da sede, só nos tenants liberados (veja sistema_tenants); alterações no banco esperam aprovação humana. Com as ferramentas navegador_* você usa sites externos num navegador da sede que a pessoa vê ao vivo.',
         },
       });
     }

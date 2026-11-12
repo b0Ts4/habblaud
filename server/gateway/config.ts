@@ -19,6 +19,8 @@ export interface GatewayRule {
   tenants: string[];
   db?: DbLevel;
   web?: WebLevel;
+  /** Navegador livre (sites externos), para os membros da regra (o tenant não importa). */
+  externo?: WebLevel;
 }
 
 export interface WebLogin {
@@ -72,6 +74,8 @@ export interface GatewayConfig {
     allowedHosts: string[];
   };
   rules: GatewayRule[];
+  /** Navegador livre (sites externos, sem login) para todos; regras com `externo` podem dar mais. Padrão: interact. */
+  external: WebLevel;
   /** Quem aprova alterações no banco: o dono do agente ("owner", padrão) ou só administradores ("admins"). */
   approvers: 'owner' | 'admins';
 }
@@ -93,7 +97,8 @@ export function parseGatewayConfig(data: unknown): GatewayConfig {
   if (f.tenants && typeof f.tenants === 'object') {
     for (const [id, name] of Object.entries(f.tenants as Record<string, unknown>)) if (/^[\w.-]{1,64}$/.test(id)) tenants[id] = typeof name === 'string' ? name : id;
   }
-  const out: GatewayConfig = { tenants, anyTenant: f.tenants === '*', rules: [], approvers: f.approvers === 'admins' ? 'admins' : 'owner' };
+  const ext = f.externo === false ? 'none' : f.externo === 'view' || f.externo === 'none' || f.externo === 'interact' ? f.externo : 'interact';
+  const out: GatewayConfig = { tenants, anyTenant: f.tenants === '*', rules: [], external: ext, approvers: f.approvers === 'admins' ? 'admins' : 'owner' };
   const db = f.db as Record<string, unknown> | undefined;
   if (db) {
     if (typeof db.readUrl !== 'string' || !/^postgres(ql)?:\/\//.test(db.readUrl)) throw new Error(tr('gateway: db.readUrl precisa ser postgres://...'));
@@ -145,7 +150,8 @@ export function parseGatewayConfig(data: unknown): GatewayConfig {
   for (const r of (Array.isArray(f.rules) ? f.rules : []) as Record<string, unknown>[]) {
     const dbl = r.db === 'read' || r.db === 'write' || r.db === 'none' ? r.db : undefined;
     const webl = r.web === 'view' || r.web === 'interact' || r.web === 'none' ? r.web : undefined;
-    out.rules.push({ members: list(r.members), tenants: list(r.tenants), db: dbl, web: webl });
+    const extl = r.externo === 'view' || r.externo === 'interact' || r.externo === 'none' ? r.externo : undefined;
+    out.rules.push({ members: list(r.members), tenants: list(r.tenants), db: dbl, web: webl, externo: extl });
   }
   return out;
 }
@@ -199,6 +205,13 @@ export function hostAllowed(list: readonly string[], host: string): boolean {
     if (pat.startsWith('*.')) return h.endsWith(pat.slice(1)) && h.length > pat.length - 1;
     return h === pat;
   });
+}
+
+/** O que o membro pode no navegador livre: o padrão da configuração ou mais, por regra. */
+export function externalLevelFor(cfg: GatewayConfig, member: string): WebLevel {
+  let lv = cfg.external;
+  for (const r of cfg.rules) if (r.externo && match(r.members, member) && WEB_RANK[r.externo] > WEB_RANK[lv]) lv = r.externo;
+  return lv;
 }
 
 export function hasWebLevel(have: WebLevel, need: WebLevel): boolean {

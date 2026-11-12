@@ -5,7 +5,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tr } from '../../shared/i18n';
 import type { Approval, GatewayService } from '../gateway/service';
-import type { WebSession } from '../gateway/web';
+import { EXTERNAL, type WebSession } from '../gateway/web';
 import { allowed, type CentralConfig, type Member } from './config';
 import { globalId } from './merge';
 import type { Members } from './members';
@@ -110,7 +110,7 @@ export function handleGatewayPages(deps: GatewayRoutesDeps, who: Member, req: In
     req.socket.setTimeout(0);
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' });
     const frame = (s: WebSession) =>
-      `event: screen\ndata: ${JSON.stringify({ id: s.id, agent: s.agentName, member: s.memberName, tenant: s.tenant, url: s.url, title: s.title, action: s.lastAction, at: s.shotAt, img: s.shot?.toString('base64') })}\n\n`;
+      `event: screen\ndata: ${JSON.stringify({ id: s.id, agent: s.agentName, member: s.memberName, tenant: s.tenant === EXTERNAL ? tr('site externo') : s.tenant, url: s.url, title: s.title, action: s.lastAction, at: s.shotAt, img: s.shot?.toString('base64') })}\n\n`;
     res.write('retry: 2000\n\n');
     for (const s of g?.web?.list() ?? []) if (s.shot && visible(deps, who, s)) res.write(frame(s));
     const off = g?.web?.onShot((s) => {
@@ -206,7 +206,7 @@ es.addEventListener('screen',(ev)=>{
   const s=JSON.parse(ev.data);let c=cards.get(s.id);
   if(!c){c={root:el('section','card'),head:el('div','row'),meta:el('div','meta'),img:el('img')};c.img.alt='Tela do navegador do agente';c.root.append(c.head,c.meta,c.img);grid.prepend(c.root);cards.set(s.id,c)}
   empty.hidden=true;
-  c.head.replaceChildren(el('strong','',s.agent+' ('+s.member+')'),el('span','tag','tenant '+s.tenant),el('span','tag',s.action));
+  c.head.replaceChildren(el('strong','',s.agent+' ('+s.member+')'),el('span','tag',s.tenant),el('span','tag',s.action));
   c.meta.textContent=(s.title?s.title+' — ':'')+s.url+' · '+new Date(s.at).toLocaleTimeString();
   if(s.img)c.img.src='data:image/jpeg;base64,'+s.img;
 });

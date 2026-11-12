@@ -36,6 +36,48 @@ Em `gateway.json` (exemplo completo em [`deploy/gateway.example.json`](../deploy
 - Vale a regra mais permissiva entre as que casam com a pessoa e o tenant. Sem regra, nada.
 - `approvers`: `owner` (padrão: o dono do agente aprova as alterações dele; administradores aprovam todas) ou `admins`.
 
+## Navegador livre (sites externos)
+
+Além do sistema da empresa, os agentes usam **qualquer site público** pelas ferramentas `navegador_abrir`, `ler`,
+`clicar`, `preencher` e `print`: um navegador da sede **sem login nenhum** (separado do navegador do sistema, para os
+logins das pessoas nunca irem para outros sites), que aparece na **Tela dos agentes** como "site externo".
+
+- **Nunca a rede interna:** endereços de rede local, da própria VPS (`127.0.0.1`, `10.x`, `192.168.x`, `172.16-31.x`),
+  de metadados da nuvem (`169.254.169.254`) e nomes `localhost`/`.local` são recusados, inclusive quando um site tenta
+  carregar algo de lá.
+- Ligado para todos por padrão; `"externo": false` (ou `"view"`) no `gateway.json` desliga (ou só deixa ver), e uma
+  regra com `"externo": "interact"` libera para pessoas específicas.
+- Sede que sai para a internet por um proxy: `HABBLAUD_GATEWAY_PROXY=http://proxy:porta` (aí quem resolve os nomes é o
+  proxy). Um `gateway.json` com só `{}` já liga o navegador livre, sem banco nem sistema.
+- Sozinhos, no computador da pessoa, os agentes também navegam como sempre (pelas ferramentas do próprio Claude Code ou
+  Codex); o navegador livre da sede é o que dá a tela ao vivo e o registro na auditoria.
+
+## Verificar o RLS do banco
+
+Rode na pasta do Habblaud da sede (ou em qualquer computador com o Habblaud instalado), com um usuário que enxergue o
+catálogo, como o dono do banco (só lê; nada é alterado e a senha não é guardada):
+
+```bash
+npm run gateway:verificar-rls -- "postgres://usuario:senha@host:5432/banco"
+```
+
+O relatório mostra, em português: cada tabela com a coluna `tenant_id` (outra: `--coluna empresa_id`) e se o RLS está
+ligado nela; as políticas e a condição de cada uma; **a variável de sessão que elas leem**, já no formato do
+`gateway.json` (`"tenantSetting": "app.tenant_id"`); tabelas com `tenant_id` e **RLS desligado** (os agentes veriam
+todos os tenants nelas); e os usuários que passam por cima do RLS (superusuário ou `BYPASSRLS`), que o gateway não deve
+usar. Sem o Habblaud, o mesmo no psql ou no DBeaver/pgAdmin:
+
+```sql
+-- tabelas com tenant_id e se o RLS está ligado (relrowsecurity) e forçado (relforcerowsecurity)
+SELECT n.nspname, c.relname, c.relrowsecurity, c.relforcerowsecurity
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r','p') AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'tenant_id');
+-- as políticas (a condição está em qual / with_check: procure current_setting('...'))
+SELECT schemaname, tablename, policyname, cmd, roles, qual, with_check FROM pg_policies;
+-- quem passa por cima do RLS
+SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolsuper OR rolbypassrls;
+```
+
 ## Banco: como preparar o Postgres
 
 O gateway aplica o tenant com `SET LOCAL <tenantSetting> = '<tenant>'` (padrão `app.tenant_id`) em cada transação, e as

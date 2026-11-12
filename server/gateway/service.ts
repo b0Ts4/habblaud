@@ -5,10 +5,10 @@
 import { appendFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { tr } from '../../shared/i18n';
-import { hasWebLevel, knownTenant, levelsFor, tenantsFor, type GatewayConfig, type WebLevel } from './config';
+import { externalLevelFor, hasWebLevel, knownTenant, levelsFor, tenantsFor, type GatewayConfig, type WebLevel } from './config';
 import { formatResult, GatewayDb, sqlProblem } from './db';
 import { applyChange, describeChange, parseChange, planChange, type ChangePlan, type ChangeSummary } from './change';
-import { GatewayWeb, type WebSession } from './web';
+import { EXTERNAL, GatewayWeb, type WebSession } from './web';
 import type { CredentialStore } from './credentials';
 import { knownTenant as isKnownTenant } from './config';
 
@@ -63,7 +63,9 @@ export class GatewayService {
 
   constructor(private readonly deps: GatewayDeps) {
     this.db = deps.db ?? (deps.config.db ? new GatewayDb(deps.config.db) : undefined);
-    this.web = deps.web ?? (deps.config.web ? new GatewayWeb(deps.config.web, process.env, (m, t) => deps.credentials?.get(m, t)) : undefined);
+    // O navegador também existe só para o navegador livre (sem o sistema da empresa configurado).
+    const webCfg = deps.config.web ?? (deps.config.external !== 'none' ? { baseUrl: 'about:blank', credentials: {}, allowedHosts: [] } : undefined);
+    this.web = deps.web ?? (webCfg ? new GatewayWeb(webCfg, process.env, (m, t) => deps.credentials?.get(m, t)) : undefined);
   }
 
   get config(): GatewayConfig {
@@ -112,6 +114,7 @@ export class GatewayService {
       };
     }
     if (action === 'alteracao') return this.waitApproval(c, String(args.id ?? ''), Number(args.esperar_segundos) || 0);
+    if (action.startsWith('livre_')) return this.external(c, action, args);
     const tenant = this.tenant(c, args.tenant);
     const lv = levelsFor(cfg, c.member, tenant);
 
@@ -173,6 +176,31 @@ export class GatewayService {
           const img = await this.web.screenshot(s);
           return { image: img.toString('base64'), text: `${s.title} — ${s.url}` };
         }
+      }
+    }
+    throw new Error(tr('ação desconhecida do gateway: {0}', [action]));
+  }
+
+  /** Navegador livre: sites externos, sem login, nunca a rede interna da sede. */
+  private async external(c: Caller, action: string, args: Record<string, unknown>): Promise<GatewayReply> {
+    if (!this.web) throw new Error(tr('o navegador não está disponível nesta sede'));
+    const lv = externalLevelFor(this.deps.config, c.member);
+    const need: WebLevel = action === 'livre_clicar' || action === 'livre_preencher' ? 'interact' : 'view';
+    if (!hasWebLevel(lv, need)) throw new Error(need === 'interact' && lv === 'view' ? tr('no navegador livre você só pode ver, não clicar nem preencher') : tr('o navegador livre está desligado para você'));
+    const s = await this.web.session(c.member, c.agentId, c.agentName, EXTERNAL, c.memberName);
+    this.audit(c, action, { url: args.url, alvo: args.alvo ?? args.campo });
+    switch (action) {
+      case 'livre_abrir':
+        return { text: await this.web.openExternal(s, String(args.url ?? '')) };
+      case 'livre_ler':
+        return { text: await this.web.read(s) };
+      case 'livre_clicar':
+        return { text: await this.web.click(s, String(args.alvo ?? '')) };
+      case 'livre_preencher':
+        return { text: await this.web.fill(s, String(args.campo ?? ''), String(args.valor ?? '')) };
+      case 'livre_print': {
+        const img = await this.web.screenshot(s);
+        return { image: img.toString('base64'), text: `${s.title} — ${s.url}` };
       }
     }
     throw new Error(tr('ação desconhecida do gateway: {0}', [action]));

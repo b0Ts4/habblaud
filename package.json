@@ -29,6 +29,7 @@
     "sede": "node --env-file-if-exists=.env.sede dist/server/central.js",
     "membro": "node --env-file-if-exists=.env dist/server/index.js",
     "membro:configurar": "tsx scripts/membro-setup.ts",
+    "gateway:verificar-rls": "tsx scripts/rls-check.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p server/tsconfig.json",
     "test": "vitest run",
     "i18n:check": "tsx scripts/i18n-check.ts",

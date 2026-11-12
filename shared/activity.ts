@@ -662,6 +662,8 @@ function describeMcp(name: string, input: Record<string, unknown>): ActivityDesc
       case 'sistema_tenants':
         return make('mcp', '🏢', tr('Vendo os tenants liberados'));
     }
+    if (tool === 'navegador_abrir') return make('browser', '🧭', tr('Abrindo {0}', [domainOf(str(input.url)) || tr('um site')]), str(input.url));
+    if (tool.startsWith('navegador_')) return make('browser', '🧭', tr('Navegador: {0}', [humanize(tool.slice('navegador_'.length))]), str(input.alvo) || str(input.campo));
     if (tool.startsWith('sistema_web_')) return make('browser', '🧭', tr('Sistema pela web: {0}', [humanize(tool.slice('sistema_web_'.length))]), str(input.caminho) || str(input.alvo));
   }
   if (/playwright|chrome|browser|puppeteer/i.test(srv)) {

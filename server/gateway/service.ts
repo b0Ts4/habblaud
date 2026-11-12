@@ -5,10 +5,12 @@
 import { appendFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { tr } from '../../shared/i18n';
-import { hasWebLevel, levelsFor, tenantsFor, type GatewayConfig, type WebLevel } from './config';
+import { hasWebLevel, knownTenant, levelsFor, tenantsFor, type GatewayConfig, type WebLevel } from './config';
 import { formatResult, GatewayDb, sqlProblem } from './db';
 import { applyChange, describeChange, parseChange, planChange, type ChangePlan, type ChangeSummary } from './change';
 import { GatewayWeb, type WebSession } from './web';
+import type { CredentialStore } from './credentials';
+import { knownTenant as isKnownTenant } from './config';
 
 export interface Caller {
   member: string;
@@ -49,6 +51,8 @@ export interface GatewayDeps {
   notify?: (a: Approval) => void;
   db?: GatewayDb;
   web?: GatewayWeb;
+  /** Login de cada pessoa no sistema (página "Meu login no sistema"). */
+  credentials?: CredentialStore;
 }
 
 export class GatewayService {
@@ -59,7 +63,7 @@ export class GatewayService {
 
   constructor(private readonly deps: GatewayDeps) {
     this.db = deps.db ?? (deps.config.db ? new GatewayDb(deps.config.db) : undefined);
-    this.web = deps.web ?? (deps.config.web ? new GatewayWeb(deps.config.web) : undefined);
+    this.web = deps.web ?? (deps.config.web ? new GatewayWeb(deps.config.web, process.env, (m, t) => deps.credentials?.get(m, t)) : undefined);
   }
 
   get config(): GatewayConfig {
@@ -76,7 +80,7 @@ export class GatewayService {
   }
 
   private tenant(c: Caller, tenant: unknown): string {
-    if (typeof tenant !== 'string' || !(tenant in this.deps.config.tenants)) throw new Error(tr('tenant desconhecido: {0}. Use sistema_tenants.', [String(tenant)]));
+    if (typeof tenant !== 'string' || !knownTenant(this.deps.config, tenant)) throw new Error(tr('tenant desconhecido: {0}. Use sistema_tenants.', [String(tenant)]));
     return tenant;
   }
 
@@ -95,6 +99,11 @@ export class GatewayService {
     const cfg = this.deps.config;
     if (action === 'tenants') {
       const list = tenantsFor(cfg, c.member);
+      if (cfg.anyTenant) {
+        const any = levelsFor(cfg, c.member, '*');
+        if (any.db !== 'none' || any.web !== 'none')
+          list.push({ id: '<subdomínio>', name: tr('qualquer tenant (o id é o subdomínio do cliente)'), ...any });
+      }
       if (!list.length) return { text: tr('Você não tem acesso a nenhum tenant pelo gateway (fale com quem administra a sede).') };
       return {
         text: list
@@ -167,6 +176,40 @@ export class GatewayService {
       }
     }
     throw new Error(tr('ação desconhecida do gateway: {0}', [action]));
+  }
+
+  // ---- Login de cada pessoa no sistema -----------------------------------------------------------------------
+
+  myLogins(member: string): { tenant: string; user: string; updatedAt: number }[] {
+    return this.deps.credentials?.list(member) ?? [];
+  }
+
+  /** Grava (ou apaga, sem senha) o login da pessoa para um tenant ou para todos ("*"). */
+  setMyLogin(member: string, tenant: string, user: string, password: string | undefined): { ok: true } | { error: string } {
+    if (!this.deps.credentials) return { error: tr('o gateway web não está configurado nesta sede') };
+    if (tenant !== '*' && !isKnownTenant(this.deps.config, tenant)) return { error: tr('tenant inválido: {0}', [tenant]) };
+    if (password === undefined) {
+      this.deps.credentials.remove(member, tenant);
+      return { ok: true };
+    }
+    if (!user.trim() || !password) return { error: tr('informe o usuário e a senha') };
+    this.deps.credentials.set(member, tenant, user.trim(), password);
+    return { ok: true };
+  }
+
+  /** Entra no sistema com o login da pessoa, para ela saber na hora se está certo. */
+  async testMyLogin(member: string, memberName: string, tenant: string): Promise<{ ok: true; text: string } | { error: string }> {
+    if (!this.web) return { error: tr('o gateway web não está configurado nesta sede') };
+    if (!isKnownTenant(this.deps.config, tenant) || tenant === '*') return { error: tr('diga um tenant para testar (o subdomínio de um cliente)') };
+    const id = `teste-login:${member}`;
+    try {
+      const s = await this.web.session(member, id, tr('Teste de login'), tenant, memberName);
+      return { ok: true, text: tr('Entrou: {0}', [s.title || s.url]) };
+    } catch (err) {
+      return { error: (err as Error).message };
+    } finally {
+      await this.web.drop(`${id}|${tenant}`);
+    }
   }
 
   // ---- Aprovações -----------------------------------------------------------------------------------------

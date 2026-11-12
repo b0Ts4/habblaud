@@ -18,6 +18,7 @@ import { CentralHub } from './central/hub';
 import { Members } from './central/members';
 import { readGatewayConfig } from './gateway/config';
 import { GatewayService } from './gateway/service';
+import { CredentialStore } from './gateway/credentials';
 import { createRequestGuard } from './http/guard';
 import { createStaticHandler } from './http/static';
 import { errMsg, log } from './log';
@@ -70,6 +71,7 @@ try {
     gateway = new GatewayService({
       config: gcfg,
       auditFile: join(dirname(file), 'gateway-audit.jsonl'),
+      credentials: gcfg.web ? new CredentialStore(join(dirname(file), 'gateway-credenciais.json'), join(dirname(file), 'gateway-key')) : undefined,
       notify: (a) =>
         hub.notice(a.caller.member, {
           id: a.id,
@@ -126,7 +128,7 @@ server.listen(port, host, () => {
   if (!secure) log.warn(tr('   Cookie de login sem Secure (HABBLAUD_CENTRAL_INSECURE_HTTP): use só para testar.'));
   log.info(
     gateway
-      ? tr('   Gateway do sistema: {0} tenant(s); banco {1}; web {2}.', [Object.keys(gateway.config.tenants).length, gateway.db ? tr('ligado') : tr('não'), gateway.web ? gateway.config.web!.baseUrl : tr('não')])
+      ? tr('   Gateway do sistema: {0} tenant(s); banco {1}; web {2}.', [gateway.config.anyTenant ? tr('qualquer') : Object.keys(gateway.config.tenants).length, gateway.db ? tr('ligado') : tr('não'), gateway.web ? gateway.config.web!.baseUrl : tr('não')])
       : tr('   Gateway do sistema: desligado (sem {0}).', [gatewayFile]),
   );
   if (!base.allowedHosts.size) log.info(tr('   Atrás de um domínio? Libere o nome em HABBLAUD_ALLOWED_HOSTS.'));

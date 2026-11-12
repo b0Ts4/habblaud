@@ -53,6 +53,7 @@ export class TopBar implements UiComponent {
   /** Sede: alterações no sistema esperando aprovação e a tela dos navegadores dos agentes (server/central/gateway-routes.ts). */
   private readonly approvalsBtn: HTMLButtonElement;
   private readonly screensBtn: HTMLButtonElement;
+  private readonly myLoginBtn: HTMLButtonElement;
   private readonly spawnPanel: SpawnPanel;
   /** Grupo dos botões de painéis (feed, Habblaud World, configurações, ajuda); o histórico entra aqui (ui/index.ts). */
   readonly panelGroup: HTMLElement;
@@ -120,6 +121,8 @@ export class TopBar implements UiComponent {
     this.spawnBtn.setAttribute('aria-haspopup', 'dialog');
     this.approvalsBtn = iconButton(ICONS.check, tr('Aprovações: alterações no sistema pedidas pelos agentes'), () => location.assign('/aprovacoes'));
     this.screensBtn = iconButton(ICONS.office, tr('Tela dos agentes: o navegador de cada agente mexendo no sistema, ao vivo'), () => location.assign('/tela'));
+    this.myLoginBtn = iconButton(ICONS.lock, tr('Meu login no sistema: o usuário com que os seus agentes entram no sistema da empresa'), () => location.assign('/meu-login'));
+    this.myLoginBtn.hidden = true;
     this.approvalsBtn.hidden = true;
     this.screensBtn.hidden = true;
     this.spawnBtn.hidden = true;
@@ -138,6 +141,7 @@ export class TopBar implements UiComponent {
       this.spawnBtn,
       this.approvalsBtn,
       this.screensBtn,
+      this.myLoginBtn,
       this.timelapseBtn,
       this.feedBtn,
       this.worldBtn,
@@ -232,6 +236,7 @@ export class TopBar implements UiComponent {
     const gateway = !!access().central?.gateway && !store.mock && !store.replaying;
     setHidden(this.approvalsBtn, !gateway);
     setHidden(this.screensBtn, !gateway);
+    setHidden(this.myLoginBtn, !gateway);
 
     this.sidebarBtn.setAttribute('aria-pressed', String(this.ctx.isPanelOpen('sidebar')));
     this.feedBtn.setAttribute('aria-pressed', String(this.ctx.isPanelOpen('feed')));

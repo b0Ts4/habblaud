@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { levelsFor, parseGatewayConfig, tenantsFor } from './config';
+import { hostAllowed, knownTenant, levelsFor, parseGatewayConfig, tenantsFor } from './config';
+import { CredentialStore } from './credentials';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as pjoin } from 'node:path';
 import { firstWord, formatResult, GatewayDb, sqlProblem } from './db';
 import { GatewayService } from './service';
 import { buildSql, describeChange, planChange, applyChange, parseChange } from './change';
@@ -164,5 +168,34 @@ describe.skipIf(!PG)('banco de verdade', () => {
     } finally {
       await db.close();
     }
+  });
+});
+
+describe('sistema com um subdomínio por cliente e login de cada pessoa', () => {
+  it('qualquer tenant com nome de subdomínio; hosts curinga só no domínio da empresa', () => {
+    const c = parseGatewayConfig({ tenants: '*', rules: [{ members: ['*'], tenants: ['*'], web: 'view' }], web: { baseUrl: 'https://app.empresa.com.br', allowedHosts: ['*.empresa.com.br'], credentials: {} } });
+    expect(knownTenant(c, 'cliente-1')).toBe(true);
+    expect(knownTenant(c, 'a.b')).toBe(false);
+    expect(knownTenant(c, '-x')).toBe(false);
+    expect(hostAllowed(c.web!.allowedHosts, 'cliente-1.empresa.com.br')).toBe(true);
+    expect(hostAllowed(c.web!.allowedHosts, 'empresa.com.br.evil.com')).toBe(false);
+    expect(hostAllowed(c.web!.allowedHosts, 'evilempresa.com.br')).toBe(false);
+    expect(hostAllowed(c.web!.allowedHosts, 'x.EMPRESA.com.br')).toBe(true);
+  });
+
+  it('o login de cada pessoa fica cifrado e o específico do tenant vale mais', () => {
+    const dir = mkdtempSync(pjoin(tmpdir(), 'cred-'));
+    const store = new CredentialStore(pjoin(dir, 'c.json'), pjoin(dir, 'k'));
+    store.set('ana', '*', 'ana@x.com', 'segredo-geral');
+    store.set('ana', 'beta', 'ana.beta@x.com', 'segredo-beta');
+    expect(store.get('ana', 'acme')).toEqual({ user: 'ana@x.com', password: 'segredo-geral' });
+    expect(store.get('ana', 'beta')).toEqual({ user: 'ana.beta@x.com', password: 'segredo-beta' });
+    expect(store.get('bia', 'acme')).toBeUndefined();
+    expect(readFileSync(pjoin(dir, 'c.json'), 'utf8')).not.toContain('segredo');
+    expect(store.list('ana').map((l) => l.user)).toEqual(['ana@x.com', 'ana.beta@x.com']);
+    // Relido do disco com a mesma chave.
+    expect(new CredentialStore(pjoin(dir, 'c.json'), pjoin(dir, 'k')).get('ana', 'acme')?.password).toBe('segredo-geral');
+    store.remove('ana', 'beta');
+    expect(store.get('ana', 'beta')?.user).toBe('ana@x.com');
   });
 });

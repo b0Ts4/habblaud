@@ -64,11 +64,29 @@ function visible(deps: GatewayRoutesDeps, who: Member, s: WebSession): boolean {
 export function handleGatewayPages(deps: GatewayRoutesDeps, who: Member, req: IncomingMessage, res: ServerResponse, url: URL): boolean {
   const path = url.pathname;
   const g = deps.gateway;
-  if (path === '/aprovacoes' || path === '/tela') {
+  if (path === '/aprovacoes' || path === '/tela' || path === '/meu-login') {
     req.resume();
-    const html = path === '/tela' ? SCREEN_PAGE : APPROVALS_PAGE;
+    const html = path === '/tela' ? SCREEN_PAGE : path === '/meu-login' ? LOGIN_PAGE : APPROVALS_PAGE;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY' });
     res.end(html);
+    return true;
+  }
+  if (path === '/api/central/my-login') {
+    if (req.method === 'GET') {
+      req.resume();
+      deps.sendJson(res, 200, { enabled: !!g?.web, logins: g?.myLogins(who.id) ?? [], anyTenant: !!g?.config.anyTenant, tenants: g ? Object.keys(g.config.tenants) : [] });
+      return true;
+    }
+    deps
+      .readJson<{ tenant?: unknown; user?: unknown; password?: unknown; remove?: unknown; test?: unknown }>(req)
+      .then(async (b) => {
+        if (!g) return deps.sendJson(res, 404, { error: tr('gateway desligado') });
+        const tenant = typeof b.tenant === 'string' && b.tenant.trim() ? b.tenant.trim().toLowerCase() : '*';
+        if (typeof b.test === 'string') return deps.sendJson(res, 200, await g.testMyLogin(who.id, who.name, b.test.trim().toLowerCase()));
+        const r = g.setMyLogin(who.id, tenant, String(b.user ?? ''), b.remove === true ? undefined : String(b.password ?? ''));
+        deps.sendJson(res, 'error' in r ? 400 : 200, r);
+      })
+      .catch(() => deps.sendJson(res, 400, { error: tr('requisição inválida') }));
     return true;
   }
   if (path === '/api/central/approvals' && req.method === 'GET') {
@@ -125,7 +143,7 @@ details summary{cursor:pointer}
 .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(min(100%,460px),1fr))}`;
 
 const APPROVALS_PAGE = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aprovações · Habblaud</title><style>${STYLE}</style></head>
-<body><header><a href="/">← Escritório</a><h1>Alterações no sistema</h1><a href="/tela">Tela dos agentes</a></header><main id="list"><p class="empty">Carregando…</p></main>
+<body><header><a href="/">← Escritório</a><h1>Alterações no sistema</h1><a href="/meu-login">Meu login</a><a href="/tela">Tela dos agentes</a></header><main id="list"><p class="empty">Carregando…</p></main>
 <script>
 const list=document.getElementById('list');
 const el=(t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!==undefined)e.textContent=txt;return e};
@@ -156,8 +174,30 @@ async function load(){
 load();setInterval(load,5000);
 </script></body></html>`;
 
+const LOGIN_PAGE = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Meu login no sistema · Habblaud</title><style>${STYLE}
+form{display:grid;gap:10px}label{display:grid;gap:4px;font-size:14px;color:var(--dim)}.okmsg{color:var(--ok)}.errmsg{color:var(--no)}</style></head>
+<body><header><a href="/">← Escritório</a><h1>Meu login no sistema</h1><a href="/aprovacoes">Aprovações</a></header><main>
+<section class="card"><p class="meta">Os seus agentes usam o sistema pela web com o <b>seu</b> usuário: o que você não pode fazer no sistema, eles também não podem. A senha fica cifrada na sede e nunca aparece para nenhum agente nem para outra pessoa.</p>
+<form id="f"><label>Usuário (e-mail)<input id="user" type="email" autocomplete="username" required></label><label>Senha<input id="pass" type="password" autocomplete="current-password" required></label>
+<label>Vale para<input id="tenant" placeholder="* = todos os clientes (ou o subdomínio de um só)" value="*"></label>
+<div class="row"><button class="ok" type="submit">Salvar</button></div></form><p id="msg" role="status"></p></section>
+<section class="card"><strong>Testar</strong><div class="row"><input id="tt" placeholder="subdomínio de um cliente para testar (ex.: app)"><button class="ok" id="tb" type="button">Testar o login</button></div><p id="tmsg" role="status"></p></section>
+<section class="card"><strong>Logins salvos</strong><div id="list" class="meta">Carregando…</div></section></main>
+<script>
+const $=(id)=>document.getElementById(id);const el=(t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!==undefined)e.textContent=txt;return e};
+const say=(n,t,ok)=>{n.textContent=t;n.className=ok?'okmsg':'errmsg'};
+async function post(b){const r=await fetch('/api/central/my-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json()}
+async function load(){const r=await fetch('/api/central/my-login',{cache:'no-store'});if(r.status===401){location.href='/login';return}const d=await r.json();const l=$('list');l.replaceChildren();
+ if(!d.enabled){l.textContent='O acesso web ao sistema não está configurado nesta sede.';return}
+ if(!d.logins.length){l.textContent='Nenhum login salvo ainda.';return}
+ for(const x of d.logins){const row=el('div','row');row.append(el('span','',x.user),el('span','tag',x.tenant==='*'?'todos os clientes':x.tenant),el('span','meta',new Date(x.updatedAt).toLocaleString()));const rm=el('button','no','Apagar');rm.onclick=async()=>{await post({tenant:x.tenant,remove:true});load()};row.append(rm);l.append(row)}}
+$('f').onsubmit=async(e)=>{e.preventDefault();const r=await post({tenant:$('tenant').value,user:$('user').value,password:$('pass').value});$('pass').value='';say($('msg'),r.error||'Salvo.',!r.error);load()};
+$('tb').onclick=async()=>{say($('tmsg'),'Entrando no sistema…',true);const r=await post({test:$('tt').value});say($('tmsg'),r.error||r.text,!r.error)};
+load();
+</script></body></html>`;
+
 const SCREEN_PAGE = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tela dos agentes · Habblaud</title><style>${STYLE}</style></head>
-<body><header><a href="/">← Escritório</a><h1>Tela dos agentes no sistema</h1><a href="/aprovacoes">Aprovações</a></header><main><div class="grid" id="grid"><p class="empty" id="empty">Nenhum agente mexendo no sistema pela web agora.</p></div></main>
+<body><header><a href="/">← Escritório</a><h1>Tela dos agentes no sistema</h1><a href="/meu-login">Meu login</a><a href="/aprovacoes">Aprovações</a></header><main><div class="grid" id="grid"><p class="empty" id="empty">Nenhum agente mexendo no sistema pela web agora.</p></div></main>
 <script>
 const grid=document.getElementById('grid'),empty=document.getElementById('empty'),cards=new Map();
 const el=(t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!==undefined)e.textContent=txt;return e};

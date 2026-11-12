@@ -73,9 +73,32 @@ O que o gateway garante, além do RLS:
 
 ## Web: o sistema pela interface, com a tela ao vivo
 
-O gateway abre um Chromium **na sede**, um por agente e tenant, já logado com a credencial do tenant (`web.credentials`;
-use `passwordEnv` para a senha ficar numa variável de ambiente, não no arquivo). A navegação fica presa aos hosts do
-sistema (`allowedHosts`, padrão: o host de `baseUrl`): links e recursos de fora são bloqueados.
+O gateway abre um Chromium **na sede**, um por agente e tenant, e entra no sistema **com o usuário da pessoa dona do
+agente**: o que a pessoa não pode fazer no sistema, os agentes dela também não podem (as permissões do próprio sistema
+continuam valendo). A navegação fica presa aos hosts do sistema (`allowedHosts`): links e recursos de fora são
+bloqueados.
+
+**Meu login no sistema** (`/meu-login`, ou o botão de cadeado na barra do escritório): cada pessoa cadastra o próprio
+usuário e senha do sistema, para todos os clientes (`*`) ou um por cliente, e testa na hora. A senha fica cifrada na
+sede (AES-256-GCM, em `gateway-credenciais.json`, com a chave em `gateway-key`), nunca volta para a página e nenhum
+agente a vê. Sem login cadastrado, o agente recebe o aviso para a pessoa cadastrar. Se a sessão do sistema expira, o
+navegador entra de novo sozinho.
+
+Sistema com **um subdomínio por cliente** (como `<cliente>.freeluxenergia.com.br`):
+
+```json
+"tenants": "*",
+"web": {
+  "baseUrl": "https://app.freeluxenergia.com.br",
+  "tenantUrl": "https://{tenant}.freeluxenergia.com.br",
+  "allowedHosts": ["*.freeluxenergia.com.br"],
+  "login": { "path": "/seguranca/login", "fields": { "#email": "{user}", "#senha": "{password}" }, "submit": "#submeter" }
+}
+```
+
+Com `"tenants": "*"`, o tenant é o próprio subdomínio (só letras, números e hífen), sem precisar listar os clientes; as
+regras continuam decidindo quem acessa o quê. `web.credentials` (um login comum, com `passwordEnv`) só serve de reserva
+para quem não cadastrou o próprio.
 
 Na VPS da sede, uma vez:
 

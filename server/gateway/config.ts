@@ -40,6 +40,11 @@ export interface WebCredential {
 export interface GatewayConfig {
   /** Tenants conhecidos: id -> nome. */
   tenants: Record<string, string>;
+  /**
+   * `"tenants": "*"`: qualquer tenant com id válido (ex.: um subdomínio por cliente, sem listar todos). As regras
+   * continuam decidindo quem acessa o quê.
+   */
+  anyTenant: boolean;
   db?: {
     readUrl: string;
     writeUrl?: string;
@@ -88,7 +93,7 @@ export function parseGatewayConfig(data: unknown): GatewayConfig {
   if (f.tenants && typeof f.tenants === 'object') {
     for (const [id, name] of Object.entries(f.tenants as Record<string, unknown>)) if (/^[\w.-]{1,64}$/.test(id)) tenants[id] = typeof name === 'string' ? name : id;
   }
-  const out: GatewayConfig = { tenants, rules: [], approvers: f.approvers === 'admins' ? 'admins' : 'owner' };
+  const out: GatewayConfig = { tenants, anyTenant: f.tenants === '*', rules: [], approvers: f.approvers === 'admins' ? 'admins' : 'owner' };
   const db = f.db as Record<string, unknown> | undefined;
   if (db) {
     if (typeof db.readUrl !== 'string' || !/^postgres(ql)?:\/\//.test(db.readUrl)) throw new Error(tr('gateway: db.readUrl precisa ser postgres://...'));
@@ -178,6 +183,22 @@ export function tenantsFor(cfg: GatewayConfig, member: string): { id: string; na
   return Object.entries(cfg.tenants)
     .map(([id, name]) => ({ id, name, ...levelsFor(cfg, member, id) }))
     .filter((t) => t.db !== 'none' || t.web !== 'none');
+}
+
+/** Id de tenant aceito: um dos listados ou, com "tenants": "*", qualquer nome que sirva de subdomínio. */
+export const TENANT_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+export function knownTenant(cfg: GatewayConfig, tenant: string): boolean {
+  return tenant in cfg.tenants || (cfg.anyTenant && TENANT_ID.test(tenant));
+}
+
+/** Host aceito pelo navegador: igual a um da lista ou, para "*.dominio", qualquer subdomínio dele. */
+export function hostAllowed(list: readonly string[], host: string): boolean {
+  const h = host.toLowerCase();
+  return list.some((p) => {
+    const pat = p.toLowerCase();
+    if (pat.startsWith('*.')) return h.endsWith(pat.slice(1)) && h.length > pat.length - 1;
+    return h === pat;
+  });
 }
 
 export function hasWebLevel(have: WebLevel, need: WebLevel): boolean {

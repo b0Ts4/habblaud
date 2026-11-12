@@ -4,7 +4,7 @@
 // ("tela do agente").
 import { createRequire } from 'node:module';
 import { tr } from '../../shared/i18n';
-import type { GatewayConfig, WebCredential } from './config';
+import { hostAllowed, type GatewayConfig, type WebCredential } from './config';
 
 type WebConfig = NonNullable<GatewayConfig['web']>;
 
@@ -67,6 +67,8 @@ export class GatewayWeb {
   constructor(
     private readonly cfg: WebConfig,
     private readonly env: NodeJS.ProcessEnv = process.env,
+    /** Login da própria pessoa no sistema (página "Meu login no sistema"); vale mais que o login comum do gateway.json. */
+    private readonly memberCredential?: (member: string, tenant: string) => { user: string; password: string } | undefined,
   ) {
     this.sweeper = setInterval(() => void this.sweep(), 60_000);
     this.sweeper.unref?.();
@@ -109,7 +111,7 @@ export class GatewayWeb {
   allowed(url: string): boolean {
     try {
       const u = new URL(url);
-      return (u.protocol === 'http:' || u.protocol === 'https:') && this.cfg.allowedHosts.includes(u.host);
+      return (u.protocol === 'http:' || u.protocol === 'https:') && hostAllowed(this.cfg.allowedHosts, u.host);
     } catch {
       return url === 'about:blank';
     }
@@ -139,20 +141,39 @@ export class GatewayWeb {
     return s;
   }
 
+  /** Endereço da tela de login: relativo ao endereço do tenant (ex.: https://<tenant>.empresa.com/seguranca/login). */
+  loginUrl(tenant: string): string {
+    const origin = new URL(fill(this.cfg.tenantUrl ?? '{base}', { base: this.cfg.baseUrl, tenant })).origin;
+    const url = new URL(this.cfg.login!.path.replace(/^\/?/, '/'), origin).toString();
+    if (!this.allowed(url)) throw new Error(tr('endereço fora do sistema: {0}', [url]));
+    return url;
+  }
+
+  /** A página atual é a tela de login (a sessão do sistema expirou ou nunca entrou). */
+  private onLoginPage(s: WebSession): boolean {
+    if (!this.cfg.login) return false;
+    try {
+      return new URL(s.page.url()).pathname.replace(/\/+$/, '') === new URL(this.loginUrl(s.tenant)).pathname.replace(/\/+$/, '');
+    } catch {
+      return false;
+    }
+  }
+
   private async login(s: WebSession): Promise<void> {
     const login = this.cfg.login!;
-    const cred = credentialFor(this.cfg, s.tenant, this.env);
-    if (!cred) throw new Error(tr('o gateway não tem credencial do sistema para o tenant {0}', [s.tenant]));
-    // O caminho do login é relativo à base do sistema (não à página do tenant).
-    const loginUrl = new URL(login.path.replace(/^\/?/, ''), `${this.cfg.baseUrl}/`).toString();
-    if (!this.allowed(loginUrl)) throw new Error(tr('endereço fora do sistema: {0}', [loginUrl]));
-    await s.page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    const cred = this.memberCredential?.(s.member, s.tenant) ?? credentialFor(this.cfg, s.tenant, this.env);
+    if (!cred) throw new Error(tr('{0} ainda não cadastrou o próprio login no sistema: é só abrir "Meu login no sistema" na sede', [s.memberName]));
+    await s.page.goto(this.loginUrl(s.tenant), { waitUntil: 'domcontentloaded', timeout: 30_000 });
     const vars = { user: cred.user, password: cred.password, tenant: s.tenant };
     const entries = Object.entries(login.fields);
     for (const [sel, tpl] of entries) await s.page.fill(sel, fill(tpl, vars), { timeout: 10_000 });
     if (login.submit) await s.page.click(login.submit, { timeout: 10_000 });
     else if (entries.length) await s.page.press(entries[entries.length - 1][0], 'Enter');
-    await s.page.waitForLoadState('domcontentloaded').catch(() => undefined);
+    await s.page.waitForURL((u: URL) => !u.pathname.replace(/\/+$/, '').endsWith(login.path.replace(/\/+$/, '')), { timeout: 15_000 }).catch(() => undefined);
+    if (this.onLoginPage(s)) {
+      await this.snap(s, tr('login recusado'));
+      throw new Error(tr('o sistema recusou o login de {0} no tenant {1}: confira em "Meu login no sistema" na sede', [s.memberName, s.tenant]));
+    }
     await this.snap(s, tr('login'));
   }
 
@@ -168,7 +189,13 @@ export class GatewayWeb {
   }
 
   async open(s: WebSession, path: string | undefined): Promise<string> {
-    await s.page.goto(this.resolve(s.tenant, path), { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    const url = this.resolve(s.tenant, path);
+    await s.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    // Caiu no login (sessão do sistema expirou): entra de novo e volta para onde ia.
+    if (this.onLoginPage(s) && !(path ?? '').includes(this.cfg.login?.path ?? '\0')) {
+      await this.login(s);
+      await s.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    }
     await this.snap(s, tr('abriu {0}', [path || '/']));
     return this.read(s);
   }
@@ -205,6 +232,10 @@ export class GatewayWeb {
       await s.page.goBack().catch(() => undefined);
       throw new Error(tr('o clique levou para fora do sistema; voltei'));
     }
+    if (this.onLoginPage(s)) {
+      await this.login(s);
+      throw new Error(tr('a sessão do sistema tinha expirado: entrei de novo. Abra a página e repita a ação.'));
+    }
     await this.snap(s, tr('clicou em {0}', [alvo]));
     return this.read(s);
   }
@@ -216,6 +247,13 @@ export class GatewayWeb {
     else await el.fill(valor, { timeout: 10_000 });
     await this.snap(s, tr('preencheu {0}', [campo]));
     return tr('Preenchido.');
+  }
+
+  /** Fecha a sessão (ex.: depois de testar o login de alguém). */
+  async drop(id: string): Promise<void> {
+    const s = this.sessions.get(id);
+    this.sessions.delete(id);
+    await s?.page.context().close().catch(() => undefined);
   }
 
   async screenshot(s: WebSession): Promise<Buffer> {

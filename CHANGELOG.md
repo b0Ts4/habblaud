@@ -36,6 +36,10 @@ do meio (0.**3**.0).
   dos dados reais ("Pedido 1: Situação de “aberto” para “pago”"; página Aprovações, também no celular), e o sistema pela interface web
   num navegador da sede já logado no tenant, com a **tela ao vivo** de cada agente (página Tela dos agentes). Regras por
   pessoa e tenant e auditoria de tudo. Guia: [docs/gateway.md](docs/gateway.md).
+- **Cada pessoa entra no sistema com o próprio usuário.** Página **Meu login no sistema** na sede (senha cifrada, botão de
+  testar); o navegador dos agentes de cada pessoa entra com o login dela, refaz o login quando a sessão expira, e as
+  permissões do próprio sistema continuam valendo. Sistemas com um subdomínio por cliente: `"tenants": "*"` e
+  `allowedHosts` com `*.dominio`.
 - **Ferramentas do escritório no feed.** Perguntar, avisar e responder outros agentes e usar o sistema aparecem como
   atividades com frases próprias.
 - **Instalação em um comando.** `npm run membro:configurar` liga o computador à sede (e, se pedido, sobe junto com o
